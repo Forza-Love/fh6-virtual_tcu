@@ -17,13 +17,14 @@ from virtual_tcu.telemetry.replay_reader import iter_replay_records
 
 
 def analyze_shift_latency(paths: list[Path], out: TextIO) -> None:
+    import statistics
+    import time
+
     from virtual_tcu.config.store import ConfigStore
+    from virtual_tcu.input.interface import OutputInterface
+    from virtual_tcu.logic.tcu import TCULogic
     from virtual_tcu.storage.profiles import ProfileStore
     from virtual_tcu.telemetry.logger import TelemetryLogger
-    from virtual_tcu.logic.tcu import TCULogic
-    from virtual_tcu.input.interface import OutputInterface
-    import time
-    import statistics
 
     class MockOutput(OutputInterface):
         def __init__(self):

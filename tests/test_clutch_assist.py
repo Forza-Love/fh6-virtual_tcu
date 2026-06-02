@@ -2,7 +2,6 @@ import time
 from unittest.mock import MagicMock, call
 
 import pytest
-
 from virtual_tcu.config.store import ConfigStore
 from virtual_tcu.input.gamepad_output import GamepadOutput
 from virtual_tcu.input.keyboard_output import KeyboardOutput
