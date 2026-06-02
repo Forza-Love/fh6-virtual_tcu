@@ -27,15 +27,22 @@ def analyze_shift_latency(paths: list[Path], out: TextIO) -> None:
     from virtual_tcu.telemetry.logger import TelemetryLogger
 
     class MockOutput(OutputInterface):
-        def __init__(self):
-            self.last_shift_time = None
+        def __init__(self, clock: "MockClock"):
+            self._clock = clock
+            self.last_shift_time: float | None = None
+
         @property
         def key_up(self) -> str: return "e"
+
         @property
         def key_down(self) -> str: return "q"
+
         def is_self_press(self, key: str) -> bool: return False
+
         def shift_to(self, from_gear: int, target_gear: int):
-            self.last_shift_time = time.time()
+            # Record time in the same clock domain as rel_ms/clock.now.
+            self.last_shift_time = self._clock.now
+
         def shutdown(self): pass
 
     class MockClock:
