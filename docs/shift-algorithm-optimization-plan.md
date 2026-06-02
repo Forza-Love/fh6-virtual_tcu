@@ -684,11 +684,11 @@ Offroad 虽然与 Race 相似，但仍有真实独有价值：
 
 ### P6 离合辅助（第九节，跨输出统一）
 
-- [ ] 统一离合配置命名（keyboard/gamepad 用 `feat_clutch_assist` 等；vjoy 沿用 `vjoy_use_clutch`）。
-- [ ] KeyboardOutput 支持 clutch sequence（pre/overlap/release 时序）。
-- [ ] GamepadOutput 支持按钮式 clutch；LT/RT 扳机式离合与刹车镜像（P2-new）冲突需处理。
-- [ ] 离合配置 UI（与 P4-new vjoy 面板协调）。
-- [ ] 增加换挡延迟 A/B 日志指标。
+- [x] 统一离合配置命名（keyboard/gamepad 用 `feat_clutch_assist` 等；vjoy 沿用 `vjoy_use_clutch`）。
+- [x] KeyboardOutput 支持 clutch sequence（pre/overlap/release 时序）。
+- [x] GamepadOutput 支持按钮式 clutch；LT/RT 扳机式离合与刹车镜像（P2-new）冲突需处理。
+- [x] 离合配置 UI（与 P4-new vjoy 面板协调）。
+- [x] 增加换挡延迟 A/B 日志指标。
 
 ---
 

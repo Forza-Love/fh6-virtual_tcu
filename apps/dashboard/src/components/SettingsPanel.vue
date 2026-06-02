@@ -5,6 +5,8 @@
   import { NButton, NCard, NFlex, NInput, NSlider, NSwitch, NTabPane, NTabs, NText } from 'naive-ui'
   import { computed, toRefs } from 'vue'
   import {
+    CLUTCH_ASSIST_FIELDS,
+    CLUTCH_TIMING_SLIDERS,
     FEATURE_TOGGLES,
     GAMEPAD_BUTTON_FIELDS,
     GAMEPAD_BUTTON_OPTIONS,
@@ -406,6 +408,31 @@
                     />
                   </NFlex>
                 </NFlex>
+
+                <NFlex justify="space-between" align="center" style="margin-top: 16px">
+                  <NText>{{ $t('extras.clutchAssist') }}</NText>
+                  <NSwitch
+                    :value="configBool('feat_clutch_assist')"
+                    @update:value="emit('setConfig', 'feat_clutch_assist', $event)"
+                  />
+                </NFlex>
+                <template v-if="configBool('feat_clutch_assist')">
+                  <NText depth="3" style="font-size: 11px; display: block; margin: 4px 0 12px">
+                    {{ $t('extras.gamepadClutchBtnHint') }}
+                  </NText>
+                  <NFlex justify="space-between" align="center" :size="8">
+                    <NText>{{ $t('extras.gamepadClutchBtn') }}</NText>
+                    <NSelect
+                      :value="configText('gamepad_clutch_btn') || ''"
+                      :options="
+                        [{label: 'None', value: ''}, ...GAMEPAD_BUTTON_OPTIONS.map((o) => ({ label: o.label, value: o.value }))]
+                      "
+                      size="small"
+                      style="width: 140px"
+                      @update:value="emit('setConfig', 'gamepad_clutch_btn', $event)"
+                    />
+                  </NFlex>
+                </template>
               </template>
               <template v-if="(($props.config as any).output_mode || 'keyboard') === 'vjoy'">
                 <NText depth="3" style="font-size: 12px; display: block; margin: 12px 0 8px">
@@ -508,6 +535,52 @@
                     @update:value="(v) => emit('setConfig', h.key, v.trim().toLowerCase())"
                   />
                 </NFlex>
+
+                <NFlex justify="space-between" align="center" style="margin-top: 16px">
+                  <NText>{{ $t('extras.clutchAssist') }}</NText>
+                  <NSwitch
+                    :value="configBool('feat_clutch_assist')"
+                    @update:value="emit('setConfig', 'feat_clutch_assist', $event)"
+                  />
+                </NFlex>
+                <template v-if="configBool('feat_clutch_assist')">
+                  <NText depth="3" style="font-size: 11px; display: block; margin: 4px 0 12px">
+                    {{ $t('extras.clutchAssistHint') }}
+                  </NText>
+                  <NFlex
+                    v-for="h in CLUTCH_ASSIST_FIELDS"
+                    :key="h.key"
+                    justify="space-between"
+                    align="center"
+                    :size="8"
+                  >
+                    <NText>{{ $t(`extras.${h.i18nKey}`) }}</NText>
+                    <NInput
+                      :value="configText(h.key)"
+                      :placeholder="h.placeholder"
+                      size="small"
+                      style="width: 100px; font-family: ui-monospace, monospace"
+                      @update:value="(v) => emit('setConfig', h.key, v.trim().toLowerCase())"
+                    />
+                  </NFlex>
+                  <NFlex vertical :size="14" style="margin-top: 12px">
+                    <div v-for="s in CLUTCH_TIMING_SLIDERS" :key="s.key">
+                      <NFlex justify="space-between" align="center" style="margin-bottom: 4px">
+                        <NText>{{ $t(`extras.${s.i18nKey}`) }}</NText>
+                        <NText code style="font-family: ui-monospace, monospace">
+                          {{ configValue(s.key) }}ms
+                        </NText>
+                      </NFlex>
+                      <NSlider
+                        :value="configValue(s.key)"
+                        :min="s.min"
+                        :max="s.max"
+                        :step="s.step ?? 1"
+                        @update:value="(v) => emit('setConfig', s.key, v)"
+                      />
+                    </div>
+                  </NFlex>
+                </template>
               </NFlex>
             </NCard>
 

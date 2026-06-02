@@ -586,7 +586,7 @@ class TCULogic:
         self._shift_count += 1
         self._kb.shift_to(td.gear, td.gear + 1)
         self._logger.mark_event()
-        self._shift_history.record("UP", td, reason=state, rule=self.mode.value)
+        self._shift_history.record("UP", td, reason=state, rule=self.mode.value, sent_at=now)
         self._session_stats.record_shift("UP", state)
         if WINSOUND_OK and self._config.get("feat_sound_beep"):
             self._audio_executor.submit(winsound.Beep, 3000, 40)
@@ -636,7 +636,7 @@ class TCULogic:
         self._last_downshift_time = now
         self._kb.shift_to(td.gear, td.gear - 1)
         self._logger.mark_event()
-        self._shift_history.record("DOWN", td, reason=state, rule=self.mode.value)
+        self._shift_history.record("DOWN", td, reason=state, rule=self.mode.value, sent_at=now)
         self._session_stats.record_shift("DOWN", state)
         if WINSOUND_OK and self._config.get("feat_sound_beep"):
             self._audio_executor.submit(winsound.Beep, 1500, 50)
@@ -665,7 +665,7 @@ class TCULogic:
         self._last_downshift_time = now
         self._kb.shift_to(td.gear, target)
         self._logger.mark_event()
-        self._shift_history.record("DOWN", td, reason="SKIP DOWN", rule=self.mode.value)
+        self._shift_history.record("DOWN", td, reason="SKIP DOWN", rule=self.mode.value, sent_at=now)
         self._session_stats.record_shift("DOWN", "BRAKE DOWN")
         self._session_stats.record_shift("DOWN", "BRAKE DOWN")
         if WINSOUND_OK and self._config.get("feat_sound_beep"):

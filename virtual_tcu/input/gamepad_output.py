@@ -143,6 +143,23 @@ class GamepadOutput(OutputInterface):
     def key_down(self) -> str:
         return str(self._config.get("gamepad_shift_down", "X")).upper()
 
+    @property
+    def use_clutch_btn(self) -> bool:
+        """True when clutch assist is enabled *and* a valid button is configured.
+
+        Clutch is intentionally button-only here: LT/RT are already used by
+        the brake-mirror logic (P2-new) and sharing the axis would require
+        explicit arbitration.  Buttons (LB, RB, A, ...) have no such conflict.
+        """
+        if not self._config.get("feat_clutch_assist", False):
+            return False
+        name = self.clutch_btn_name
+        return bool(name) and name in _BUTTON_MAP
+
+    @property
+    def clutch_btn_name(self) -> str:
+        return str(self._config.get("gamepad_clutch_btn", "")).upper()
+
     def is_self_press(self, key: str) -> bool:
         # Gamepads don't have a keyboard-style echo problem — the TCU
         # injects buttons, the game reads them, no paddle listener conflict.
@@ -184,19 +201,47 @@ class GamepadOutput(OutputInterface):
     # -- internals -------------------------------------------------------------
 
     def _press_release(self, name: str):
-        """Press *name*, hold BUTTON_HOLD_S, release, and update the device."""
+        """Press *name*, hold BUTTON_HOLD_S, release, and update the device.
+
+        When ``use_clutch_btn`` is True, the clutch button (a face / shoulder
+        button -- never LT/RT) is pressed before the shift button and released
+        afterwards, matching the FH6 'Manual with Clutch' protocol:
+
+            press clutch -> press shift -> release shift -> release clutch
+
+        The brake mirror (_apply_brake) runs before every ``update()`` as
+        usual, so clutch-assisted shifts are fully compatible with P2-new.
+        """
         btn = _BUTTON_MAP.get(name.upper())
         if btn is None:
             print(f"[Gamepad] unknown button '{name}' - check config")
             return
+
+        clutch_btn = _BUTTON_MAP.get(self.clutch_btn_name) if self.use_clutch_btn else None
+
         try:
+            # 1. Optionally press clutch
+            if clutch_btn is not None:
+                self._apply_brake()
+                self._gamepad.press_button(button=clutch_btn)
+                self._gamepad.update()
+
+            # 2. Press shift button
             self._apply_brake()
             self._gamepad.press_button(button=btn)
             self._gamepad.update()
             time.sleep(self.BUTTON_HOLD_S)
+
+            # 3. Release shift button
             self._apply_brake()
             self._gamepad.release_button(button=btn)
             self._gamepad.update()
+
+            # 4. Optionally release clutch
+            if clutch_btn is not None:
+                self._apply_brake()
+                self._gamepad.release_button(button=clutch_btn)
+                self._gamepad.update()
         except Exception as e:
             print(f"[Gamepad] input simulation failed: {e}")
 
