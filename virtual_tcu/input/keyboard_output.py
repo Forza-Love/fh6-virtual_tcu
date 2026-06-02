@@ -119,24 +119,41 @@ class KeyboardOutput(OutputInterface):
         The self-press window covers the entire sequence so the paddle
         listener does not mis-read the injected key as a manual input.
         """
+        ck = self.clutch_key
+        k = key.lower()
+        pressed_ck = False
+        pressed_k = False
         try:
-            key = key.lower()
-            ck = self.clutch_key
             pre_s = self.clutch_pre_ms / 1000.0
             overlap_s = self.clutch_overlap_ms / 1000.0
             release_s = self.clutch_release_ms / 1000.0
             # Extend self-press window for the full sequence duration.
             total_s = pre_s + overlap_s + release_s + 0.05
             deadline = time.time() + total_s + self.SELF_PRESS_WINDOW_S
-            self._self_press_until[key] = deadline
+            self._self_press_until[k] = deadline
             self._self_press_until[ck] = deadline
 
             keyboard.press(ck)
+            pressed_ck = True
             time.sleep(pre_s)
-            keyboard.press(key)
+
+            keyboard.press(k)
+            pressed_k = True
             time.sleep(overlap_s)
-            keyboard.release(key)
+
+            keyboard.release(k)
+            pressed_k = False
             time.sleep(release_s)
+
             keyboard.release(ck)
+            pressed_ck = False
         except Exception as e:
             print(f"[KB] Clutch-assisted shift failed: {e}")
+        finally:
+            try:
+                if pressed_k:
+                    keyboard.release(k)
+                if pressed_ck:
+                    keyboard.release(ck)
+            except Exception:
+                pass
