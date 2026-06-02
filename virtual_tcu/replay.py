@@ -58,14 +58,13 @@ def analyze_shift_latency(paths: list[Path], out: TextIO) -> None:
     for path in paths:
         cfg = ConfigStore(path="dummy.json")
         prof = ProfileStore(path="dummy.json")
-        mock_out = MockOutput()
-        tcu = TCULogic(mock_out, prof, cfg, TelemetryLogger())
-        
         clock = MockClock()
+        mock_out = MockOutput(clock)
+        tcu = TCULogic(mock_out, prof, cfg, TelemetryLogger())
+
         import virtual_tcu.logic.tcu
         original_time = virtual_tcu.logic.tcu.time.time
         virtual_tcu.logic.tcu.time.time = clock
-
         latencies = []
         pending_shift_time = None
         prev_gear = None
