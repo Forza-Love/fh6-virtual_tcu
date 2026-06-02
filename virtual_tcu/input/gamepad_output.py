@@ -244,6 +244,18 @@ class GamepadOutput(OutputInterface):
                 self._gamepad.update()
         except Exception as e:
             print(f"[Gamepad] input simulation failed: {e}")
+        finally:
+            # Best-effort cleanup: avoid leaving buttons pressed after failures.
+            try:
+                self._apply_brake()
+                self._gamepad.release_button(button=btn)
+                self._gamepad.update()
+                if clutch_btn is not None:
+                    self._apply_brake()
+                    self._gamepad.release_button(button=clutch_btn)
+                    self._gamepad.update()
+            except Exception:
+                pass
 
     def _apply_brake(self) -> None:
         """Mirror the cached physical brake onto the virtual LT.
