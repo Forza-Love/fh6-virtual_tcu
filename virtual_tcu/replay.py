@@ -18,7 +18,6 @@ from virtual_tcu.telemetry.replay_reader import iter_replay_records
 
 def analyze_shift_latency(paths: list[Path], out: TextIO) -> None:
     import statistics
-    import time
 
     from virtual_tcu.config.store import ConfigStore
     from virtual_tcu.input.interface import OutputInterface
@@ -27,7 +26,7 @@ def analyze_shift_latency(paths: list[Path], out: TextIO) -> None:
     from virtual_tcu.telemetry.logger import TelemetryLogger
 
     class MockOutput(OutputInterface):
-        def __init__(self, clock: "MockClock"):
+        def __init__(self, clock: MockClock):
             self._clock = clock
             self.last_shift_time: float | None = None
 

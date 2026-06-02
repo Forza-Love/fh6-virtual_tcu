@@ -91,7 +91,7 @@ export const CLUTCH_ASSIST_FIELDS = [
 
 export const CLUTCH_TIMING_SLIDERS: SliderDef[] = [
   { key: 'clutch_pre_ms', i18nKey: 'clutchPreMs', min: 0, max: 100, unit: 'raw' },
-  { key: 'clutch_overlap_ms', i18nKey: 'clutchOverlapMs', min: 20, max: 150, unit: 'raw' },
+  { key: 'clutch_overlap_ms', i18nKey: 'clutchOverlapMs', min: 20, max: 100, unit: 'raw' },
   { key: 'clutch_release_ms', i18nKey: 'clutchReleaseMs', min: 0, max: 100, unit: 'raw' },
 ]
 
