@@ -32,8 +32,8 @@ class ShiftHistory:
                 "rule": rule,
                 "blocked_by": blocked_by,
             }
-            # sent_at enables A/B shift-latency analysis in replay.py:
-            # time delta from command issue to observed gear change in telemetry.
+            # sent_at records when the shift command was issued (seconds since epoch/clock).
+            # This can be used later to analyze command-to-gear-change latency.
             if sent_at is not None:
                 entry["shift_sent_at"] = sent_at
             self._history.append(entry)
