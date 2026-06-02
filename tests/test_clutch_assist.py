@@ -73,7 +73,7 @@ def mock_vgamepad(monkeypatch):
     mock_vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB = 0x0040
     mock_vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB = 0x0080
 
-    sys.modules["vgamepad"] = mock_vg
+    monkeypatch.setitem(sys.modules, "vgamepad", mock_vg)
     monkeypatch.setattr("virtual_tcu.input.gamepad_output.time.sleep", MagicMock())
 
     # Force rebuild of the button map using the mocked vgamepad
