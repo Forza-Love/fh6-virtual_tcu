@@ -174,15 +174,20 @@ class PowerCurveDetector:
         return self._peaks(car_key)[2]
 
     def optimal_upshift_rpm(
-        self, td: Telemetry, fallback: float = 0.85, offset: float = 0.03
+        self, td: Telemetry, fallback: float = 0.85, offset: float = 0.03, floor: float = 0.0
     ) -> float:
         pt, pp, conf = self._peaks(td.car_key)
         if pp is None:
             return fallback
+        # Very low confidence → the parabola is barely trained and its peak
+        # could sit anywhere; trust the hand-tuned fallback instead of
+        # blending in a potentially wild model value.
+        if conf < 0.3:
+            return max(fallback, floor)
         model = max(0.65, min(0.97, pp + offset))
         # Blend: early low-confidence estimates lean on the fallback,
         # mature ones trust the model fully.
-        return conf * model + (1.0 - conf) * fallback
+        return max(conf * model + (1.0 - conf) * fallback, floor)
 
     def has_data(self, car_key: tuple) -> bool:
         return self._peaks(car_key)[1] is not None

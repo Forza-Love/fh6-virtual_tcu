@@ -654,8 +654,15 @@ class TCULogic:
             cascade_lock = cascade_lock_s
         elif state in ("BRAKE DOWN", "MISMATCH", "ENGINE BRAKE") or td.brake > 0.45:
             cascade_lock = 0.30
-        elif state in ("KICKDOWN", "PREDICTIVE", "TORQUE DOWN", "BAND DOWN"):
-            cascade_lock = 0.70
+        elif state in (
+            "KICKDOWN",
+            "PREDICTIVE",
+            "TORQUE DOWN",
+            "BAND DOWN",
+            "RACE POWER DOWN",
+            "GEAR MATCH",
+        ):
+            cascade_lock = 0.40
         elif state in ("ANTI-STALL", "STANDSTILL", "COAST DOWN", "DRIFT HOLD"):
             cascade_lock = 0.60
         else:
@@ -841,8 +848,8 @@ class TCULogic:
             if not (td.rpm_pct < 0.50 and td.brake > 0.70):
                 return False
 
-        if target is not None and target <= td.gear - 3 and td.brake > 0.80 and td.gear >= 4:
-            if self._shift_down_double(td, lock_ms, target):
+        if target is not None and target <= td.gear - 2 and td.brake > 0.50 and td.gear >= 3:
+            if self._shift_down_double(td, lock_ms, max(target, td.gear - 2)):
                 self._no_upshift_until = now + 0.5
                 return True
 
@@ -914,9 +921,23 @@ class TCULogic:
             return False
         if td.speed_kmh <= Cfg.MIN_SPEED_KMH:
             return False
+        # Wheelspin inflates RPM without real speed gain — block upshift
+        # so the driver keeps torque to pull through the slip.
+        if self._is_wheelspin_rpm_inflation(td):
+            return False
 
         fallback = self._config.get("race_up_wot", 94) / 100
-        target_pct = self._power_curve.optimal_upshift_rpm(td, fallback=fallback, offset=offset)
+        # When the rev-limiter detector has lowered engine_max_rpm, the
+        # percentage scale is compressed: 94% of 7100 is only 6674 RPM,
+        # which *looks* like the car barely entered the redzone on the
+        # dashboard (whose scale still shows 8000).  Push the target
+        # closer to the detected limiter so the engine is fully utilised.
+        real_redline = self._rev_limiter.effective_redline(td)
+        if real_redline is not None:
+            fallback = max(fallback, 0.96)
+        target_pct = self._power_curve.optimal_upshift_rpm(
+            td, fallback=fallback, offset=offset, floor=0.88
+        )
         if td.rpm_pct < target_pct:
             return False
         return self._shift_up(td, 300, "UPSHIFT", "in band", downshift_lock_s=downshift_lock_s)
@@ -1255,6 +1276,29 @@ class TCULogic:
         new = sum(recent[-3:]) / 3
         return (new - old) < 0.5
 
+    def _is_wheelspin_rpm_inflation(self, td: Telemetry) -> bool:
+        """True when RPM is inflated by wheelspin rather than real speed.
+
+        During traction loss the drive wheels spin faster than the car
+        travels, so RPM climbs while speed stalls.  An upshift here would
+        drop torque and leave the car underpowered once grip returns."""
+        if not self._config.get("feat_drivetrain_aware"):
+            return False
+        if td.drivetrain == 0:  # FWD
+            slip = max(abs(td.slip_fl), abs(td.slip_fr))
+        elif td.drivetrain == 1:  # RWD
+            slip = max(abs(td.slip_rl), abs(td.slip_rr))
+        else:  # AWD
+            slip = max(abs(td.slip_fl), abs(td.slip_fr), abs(td.slip_rl), abs(td.slip_rr))
+        if slip < 0.8:
+            return False
+        # Slip is significant — check whether speed is actually climbing.
+        if len(self._speed_history) < 10:
+            return False
+        recent = list(self._speed_history)[-10:]
+        speed_delta = sum(recent[-3:]) / 3 - sum(recent[:3]) / 3
+        return speed_delta < 1.5
+
     def _mode_comfort(self, td: Telemetry, now: float):
         thr = td.throttle
         sporty = self._config.get("feat_drive_style") and self._drive_style.regime in (
@@ -1409,7 +1453,11 @@ class TCULogic:
         power_thr = self._config.get("race_power_thr", 68) / 100
         power_floor = self._config.get("race_power_floor", 60) / 100
         if self._track_power_demand_downshift(
-            td, now, min_throttle=power_thr, target_floor=power_floor
+            td,
+            now,
+            min_throttle=min(power_thr, 0.50),
+            target_floor=power_floor,
+            cascade_lock_s=0.22,
         ):
             return
 
@@ -1421,8 +1469,24 @@ class TCULogic:
             self._shift_up(td, 400, "WHEELSPIN", "traction save", downshift_lock_s=0.5)
             return
 
-        if self._track_out_of_band_kickdown(td, now, climb_only=True):
+        if self._track_out_of_band_kickdown(td, now, climb_only=False):
             return
+
+        # Gear-match recovery: throttle applied but RPM is far below the
+        # power band — the car is stuck in a too-tall gear after a corner,
+        # crash, or spin.  Step down towards the power-band gear.
+        if (
+            thr > 0.30
+            and td.rpm_pct < 0.45
+            and td.gear > 2
+            and td.speed_kmh > 20.0
+            and now >= self._no_downshift_until
+        ):
+            target = self._target_gear_for_power(td)
+            if target is not None and target < td.gear:
+                self._shift_down(td, 350, "GEAR MATCH", f"→{target}")
+                self._no_upshift_until = now + 0.5
+                return
 
         cruise_quiet = self._config.get("feat_drive_style") and self._drive_style.regime == "CRUISE"
         up_offset = 0.0 if cruise_quiet else 0.03
