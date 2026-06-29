@@ -8,14 +8,13 @@ Virtual TCU **production runtime is Windows-only** (`python -m virtual_tcu` exit
 
 ### Node.js version
 
-The monorepo requires **Node ≥ 24** (`package.json` `engines`, `.node-version`). The VM default Node may be 22 (`/exec-daemon/node`). Before `pnpm install` or any pnpm script:
+The monorepo requires **Node ≥ 24** (`package.json` `engines`, `.node-version`). The VM default Node may be 22 (`/exec-daemon/node`). The startup update script already installs/selects Node 24 via `nvm` and activates `pnpm@10.33.0`. In a fresh shell that did not inherit that selection, re-select it before any pnpm script (do not hardcode the patch version, which changes — `nvm install 24` currently resolves to v24.18.0):
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH"
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+nvm use 24   # or `nvm install 24` if missing
 corepack enable && corepack prepare pnpm@10.33.0 --activate
 ```
-
-(Install Node 24 once with `nvm install 24` if that directory is missing.)
 
 ### Python tools on PATH
 
@@ -44,6 +43,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, ESLint, Ruff, `build
 ### Optional: Web UI smoke on Linux
 
 After `pnpm build:dashboard`, you can serve the dashboard with aiohttp by running `WebServer` from a small inline/async script with `TCULogic` + `FakeOutput` (see `tests/conftest.py`). The real app entrypoint `main()` will not start on Linux. Vite dev (`pnpm dev:dashboard`, port 5173) proxies `/ws` to `127.0.0.1:8765` and needs a backend on that port.
+
+To make such a smoke feed the dashboard with live data (instead of the default `OFFLINE` / `N` placeholders), the simulated telemetry frames must set `is_race_on = 1` (the UI renders gear `N` whenever `is_race_on` is falsy — see `formatGearLabel` in `packages/shared/src/utils/format.ts`), and the loop must keep `receiver.last_recv_time = time.time()` fresh each frame (the receiver's `is_live` is a 2.5s freshness window). The dashboard's `broadcast_loop` only reads `receiver.latest()` and calls `tcu.snapshot()`; drive `tcu.process(td)` yourself to exercise shift logic.
 
 ### Git hooks
 
