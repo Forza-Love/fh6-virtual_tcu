@@ -9,9 +9,9 @@ class Cfg:
     KEY_HOLD_S = 0.04
     SHIFT_COOLDOWN_MS = 350
     POST_BRAKE_GRACE_MS = 600
-    LOW_GEAR_LOCK_MS = 800
+    LOW_GEAR_LOCK_MS = 400
     # Wait for the game to acknowledge an upshift before retrying (prevents E-key spam).
-    UPSHIFT_PENDING_TIMEOUT_S = 1.2
+    UPSHIFT_PENDING_TIMEOUT_S = 0.7
     # After a low-gear upshift is rejected, wait this long before clearing the soft cap
     # and allowing another attempt (still at WOT / redline).
     UPSHIFT_CAP_RETRY_S = 0.8
