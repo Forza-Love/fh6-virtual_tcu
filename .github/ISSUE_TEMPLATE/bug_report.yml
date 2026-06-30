@@ -16,7 +16,7 @@ body:
     attributes:
       label: Virtual TCU Version / 版本号
       description: e.g. `13.2.2` from the tray menu, dashboard footer, or GitHub Release tag. / 例如托盘菜单、仪表盘页脚或 Release 标签中的版本号。
-      placeholder: "13.2.2"
+      placeholder: 13.2.2
     validations:
       required: true
 
@@ -37,7 +37,7 @@ body:
     attributes:
       label: Windows Version / Windows 版本
       description: e.g. Windows 11 23H2 (build 22631). / 例如 Windows 11 23H2 (build 22631)。
-      placeholder: "Windows 11 23H2"
+      placeholder: Windows 11 23H2
     validations:
       required: true
 
@@ -127,7 +127,7 @@ body:
     attributes:
       label: Car (if applicable) / 车辆（如适用）
       description: Car name, class, PI, and whether per-car profile was learned. / 车名、组别、PI，以及是否已学习车辆档案。
-      placeholder: "e.g. Porsche 911 GT3 RS — S1 900 — profile learned / 已学习档案"
+      placeholder: e.g. Porsche 911 GT3 RS — S1 900 — profile learned / 已学习档案
 
   - type: checkboxes
     id: environment

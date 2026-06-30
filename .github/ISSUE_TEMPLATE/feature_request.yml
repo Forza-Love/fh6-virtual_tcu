@@ -86,7 +86,7 @@ body:
     id: version
     attributes:
       label: Virtual TCU Version (if relevant) / 版本号（如相关）
-      placeholder: "13.2.2 or N/A / 不适用"
+      placeholder: 13.2.2 or N/A / 不适用
 
   - type: checkboxes
     id: contribution
