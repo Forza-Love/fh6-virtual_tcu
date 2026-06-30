@@ -1,0 +1,107 @@
+name: Feature Request / 功能建议
+description: Suggest a new feature or improvement to shift logic, UI, or workflow. / 建议新功能或改进换档逻辑、界面与工作流。
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+          Share what problem you want Virtual TCU to solve. Focus on **driving behavior, telemetry, UI, or integration** — not generic ideas without context.
+
+          请说明希望 Virtual TCU 解决什么问题，尽量结合**驾驶行为、遥测、界面或集成**等具体场景，而非空泛描述。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use Case / 问题或使用场景
+      description: What pain point or limitation do you hit today? Who benefits (casual, drift, time attack, offroad)? / 当前遇到什么痛点或限制？受益人群是谁（休闲、漂移、计时赛、越野等）？
+      placeholder: |
+        e.g. In drift events I often want TCU to hold a gear longer before upshifting, but COMFORT upshifts too early and RACE is too aggressive on downshifts.
+
+        例如在漂移赛中希望 TCU 更久保持档位，但 COMFORT 升档过早、RACE 降档又过于激进。
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / 建议方案
+      description: Describe the behavior or UI you want. Be specific about modes, settings, or defaults. / 描述期望的行为或界面，尽量说明涉及的模式、设置项或默认值。
+      placeholder: |
+        e.g. Add a "Drift hold" slider under DRIFT settings, or a per-mode upshift delay in ms …
+
+        例如为 DRIFT 模式增加「保持档位」滑块，或为各模式增加升档延迟（毫秒）…
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Primary Area / 主要涉及模块
+      multiple: true
+      options:
+        - Shift logic / drive modes (COMFORT, RACE, DRIFT, OFFROAD, MANUAL) / 换档逻辑与驾驶模式
+        - Learning (gear ratios, power curve, rev limiter, drive style) / 学习系统
+        - Safety guards (anti-stall, over-rev, cornering/airtime lock) / 安全保护
+        - Dashboard Web UI / 仪表盘 Web UI
+        - Floating HUD / 浮窗 HUD
+        - Electron shell (tray, hotkeys, auto-update) / Electron 外壳
+        - Keyboard / vJoy output / 键盘或 vJoy 输出
+        - Telemetry / replay logs / 遥测与回放日志
+        - Config & per-car profiles / 配置与车辆档案
+        - Documentation / onboarding / 文档与上手体验
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: How much does this matter to you? / 对你有多重要？
+      options:
+        - Nice to have / 有了更好
+        - Would improve my daily use / 会明显改善日常使用
+        - Blocking — I can't use TCU well without it / 没有它就很难用好 TCU
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered / 考虑过的替代方案
+      description: Workarounds with current settings, manual shifting, or other tools. / 现有设置、手动换档或其他工具的变通办法。
+      placeholder: |
+        e.g. I tried raising `race_up_wot` in config but it breaks other cars …
+
+        例如尝试调高 `race_up_wot`，但会影响其他车辆 …
+
+  - type: textarea
+    id: mockup
+    attributes:
+      label: Mockups / Examples / 示意或参考
+      description: Links to screenshots, sketches, other games' TCU behavior, or similar open-source projects. / 截图、草图、其他游戏 TCU 行为或类似开源项目链接。
+
+  - type: input
+    id: version
+    attributes:
+      label: Virtual TCU Version (if relevant) / 版本号（如相关）
+      placeholder: 13.2.2 or N/A / 不适用
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution / 贡献意愿
+      options:
+        - label: I am willing to help test a preview build. / 愿意协助测试预览版。
+          required: false
+        - label: I am willing to submit a PR if guided. / 在指导下愿意提交 PR。
+          required: false
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Acknowledgement / 确认
+      options:
+        - label: I searched existing issues and did not find a duplicate. / 我已搜索现有 Issue，未发现重复。
+          required: true

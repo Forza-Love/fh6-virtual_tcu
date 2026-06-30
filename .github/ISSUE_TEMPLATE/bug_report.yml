@@ -1,0 +1,168 @@
+name: Bug Report / 缺陷报告
+description: Report unexpected behavior, crashes, or broken features. / 报告异常行为、崩溃或功能失效。
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+          Thanks for taking the time to report a bug. Please fill in as much as you can — **Virtual TCU is Windows-only** and depends on FH6 UDP telemetry and keyboard/vJoy output.
+
+          感谢提交缺陷报告。请尽量填写完整信息——**Virtual TCU 仅支持 Windows**，并依赖 FH6 UDP 遥测与键盘/vJoy 输出。
+
+  - type: input
+    id: version
+    attributes:
+      label: Virtual TCU Version / 版本号
+      description: e.g. `13.2.2` from the tray menu, dashboard footer, or GitHub Release tag. / 例如托盘菜单、仪表盘页脚或 Release 标签中的版本号。
+      placeholder: 13.2.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How did you install? / 安装方式
+      options:
+        - GitHub Release installer (Electron) / Release 安装包（Electron）
+        - Backend-only zip / 纯后端压缩包
+        - From source (pnpm + Python) / 源码运行
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Windows Version / Windows 版本
+      description: e.g. Windows 11 23H2 (build 22631). / 例如 Windows 11 23H2 (build 22631)。
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Area / 影响范围
+      description: Pick the closest match. / 选择最接近的模块。
+      multiple: true
+      options:
+        - Electron shell (tray, auto-update, lifecycle) / Electron 外壳（托盘、更新、生命周期）
+        - Dashboard Web UI / 仪表盘 Web UI
+        - Floating HUD overlay / 浮窗 HUD
+        - Backend — shift logic / TCU / 后端换档逻辑
+        - Telemetry — UDP receiver / 遥测 UDP 接收
+        - Keyboard output (E/Q keys) / 键盘输出
+        - vJoy / DirectInput output / vJoy 输出
+        - Config & per-car profiles / 配置与车辆档案
+        - Installer / packaging / 安装包与打包
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: output_mode
+    attributes:
+      label: Output Mode / 输出模式
+      options:
+        - Keyboard (E/Q) / 键盘
+        - vJoy / DirectInput
+        - Unknown / 不确定
+        - Not applicable / 不适用
+    validations:
+      required: true
+
+  - type: dropdown
+    id: drive_mode
+    attributes:
+      label: Drive Mode When It Happened / 出现问题时的驾驶模式
+      options:
+        - COMFORT
+        - RACE
+        - DRIFT
+        - OFFROAD
+        - MANUAL
+        - Multiple / switched during session / 多种或中途切换
+        - Not in game / offline / 未进游戏或离线
+        - Unknown / 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened / 发生了什么
+      description: Describe the actual behavior. Include gear, RPM, speed, throttle/brake if relevant. / 描述实际行为；若相关请说明档位、转速、车速、油门/刹车等。
+      placeholder: |
+        e.g. In RACE mode at ~180 km/h in 4th, TCU spammed upshift (E) but gear stayed at 4. Dashboard showed LIVE telemetry.
+
+        例如在 RACE 模式、4 档约 180 km/h 时，TCU 反复发送升档（E）但档位不变，仪表盘显示 LIVE。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior / 期望行为
+      description: What should have happened instead? / 你认为正确的行为应该是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce / 复现步骤
+      description: Numbered steps help a lot. Mention FH6 settings (manual transmission, UDP telemetry on port 5555). / 请尽量分步说明，并注明 FH6 设置（手动档、UDP 遥测端口 5555）。
+      placeholder: |
+        1. Install v13.2.2 from Release, run as Administrator
+        2. In FH6: Manual transmission, Data Out → Car Dash, port 5555
+        3. Select COMFORT, drive in free roam with …
+        4. See bug at …
+    validations:
+      required: true
+
+  - type: input
+    id: car
+    attributes:
+      label: Car (if applicable) / 车辆（如适用）
+      description: Car name, class, PI, and whether per-car profile was learned. / 车名、组别、PI，以及是否已学习车辆档案。
+      placeholder: e.g. Porsche 911 GT3 RS — S1 900 — profile learned / 已学习档案
+
+  - type: checkboxes
+    id: environment
+    attributes:
+      label: Environment Checks / 环境确认
+      options:
+        - label: Ran Virtual TCU as Administrator / 以管理员身份运行 Virtual TCU
+          required: false
+        - label: FH6 UDP telemetry enabled (Car Dash, port 5555) / 已开启 FH6 UDP 遥测（Car Dash，端口 5555）
+          required: false
+        - label: Dashboard shows LIVE (not OFFLINE) / 仪表盘显示 LIVE（非 OFFLINE）
+          required: false
+        - label: Issue happens on a clean install / default config / 默认配置或全新安装也会出现
+          required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & Config / 日志与配置
+      description: |
+        Attach `logs/tcu_replay*.bin.gz` (F8 snapshot), relevant lines from `%APPDATA%/VirtualTCU/` or install-dir logs, or redacted snippets from `tcu_config.json`.
+        **Remove personal paths if needed.**
+        可附上 `logs/tcu_replay*.bin.gz`（F8 快照）、日志片段或脱敏后的 `tcu_config.json`。
+      placeholder: Paste log excerpts or describe what you can attach. / 粘贴日志摘要或说明可提供的附件。
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Context / 补充信息
+      description: Screenshots, screen recordings, related issues, custom settings. / 截图、录屏、相关 Issue、自定义设置等。
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Acknowledgement / 确认
+      options:
+        - label: I searched existing issues and did not find a duplicate. / 我已搜索现有 Issue，未发现重复。
+          required: true
