@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/Forza-Love/fh6-virtual_tcu/releases
     about: Download the latest Windows installer or backend-only zip. / 下载最新 Windows 安装包或纯后端压缩包。
   - name: Documentation / 文档
-    url: https://github.com/Forza-Love/fh6-virtual_tcu/blob/main/CLAUDE.md
+    url: https://github.com/Forza-Love/fh6-virtual_tcu/blob/main/README.md
     about: Setup, architecture, and development guide. / 安装、架构与开发说明。
