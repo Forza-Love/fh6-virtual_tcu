@@ -103,7 +103,7 @@ class PowerCurveDetector:
     GOOD_SPREAD = 0.16
     # Upshift timing needs samples near the real redline; mid-range-only fits
     # extrapolate a peak too early (common on RWD before a limiter pull).
-    HIGH_RPM_COVERAGE = 0.78
+    HIGH_RPM_COVERAGE = 0.90
     STATIONARY_LEARN_SPEED_KMH = 8.0
 
     def __init__(self):
@@ -184,7 +184,7 @@ class PowerCurveDetector:
         conf = n_conf * s_conf * high_conf
         # Mid-range-only parabolas often place the peak far below the real
         # power band — ignore until we have high-RPM evidence.
-        if max_r < self.HIGH_RPM_COVERAGE and pp < 0.82:
+        if max_r < self.HIGH_RPM_COVERAGE:
             return None, None, 0.0
         return pt, pp, conf
 
@@ -209,7 +209,7 @@ class PowerCurveDetector:
         # configured fallback while high-RPM coverage is still missing.
         blended = conf * model + (1.0 - conf) * fallback
         max_r = self._max_r.get(td.car_key, 0.0)
-        if max_r < self.HIGH_RPM_COVERAGE:
+        if max_r < self.HIGH_RPM_COVERAGE or conf < 0.70:
             return max(blended, fallback)
         return blended
 

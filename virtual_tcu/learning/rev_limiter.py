@@ -16,10 +16,14 @@ class RevLimiterDetector:
     Converges in ~0.7s of sustained limiter bounce."""
 
     MIN_THROTTLE = 0.92
-    POST_SHIFT_IGNORE_S = 0.6
+    POST_DOWNSHIFT_IGNORE_S = 0.6
+    POST_UPSHIFT_IGNORE_S = 0.8
     WINDOW = 24
     STABLE_FRAMES = 18
     MIN_PEAK_PCT = 0.62
+    # True fuel-cut bounces happen at the real ceiling (near nominal redline).
+    # TCU upshifts in Race/Comfort land ~3–8% below that and must not be stored.
+    MIN_COMMIT_NOMINAL_FRAC = 0.97
     PEAK_EPS = 40.0
     MIN_OSCILLATION = 150.0
 
@@ -32,14 +36,22 @@ class RevLimiterDetector:
         self._rpm_window.pop(car, None)
         self._peak_hold.pop(car, None)
 
-    def observe(self, td: Telemetry, last_downshift_time: float, now: float):
+    def observe(
+        self,
+        td: Telemetry,
+        last_downshift_time: float,
+        now: float,
+        *,
+        last_upshift_time: float = 0.0,
+    ):
         car = td.car_key
         if (
             car[0] <= 0
             or td.is_shifting
             or td.engine_max_rpm <= 0
             or td.throttle < self.MIN_THROTTLE
-            or now - last_downshift_time < self.POST_SHIFT_IGNORE_S
+            or now - last_downshift_time < self.POST_DOWNSHIFT_IGNORE_S
+            or now - last_upshift_time < self.POST_UPSHIFT_IGNORE_S
             or td.rear_slip > 0.8
             or td.front_slip > 0.8
         ):
@@ -73,6 +85,8 @@ class RevLimiterDetector:
             # limiter sample, and the engine cannot exceed the limiter at
             # WOT. The highest confirmed bounce is the true cutoff, so a
             # stray low reading can never drag the estimate down.
+            if held_peak < td.engine_max_rpm * self.MIN_COMMIT_NOMINAL_FRAC:
+                return
             if held_peak > self._redline.get(car, 0.0):
                 self._redline[car] = held_peak
 

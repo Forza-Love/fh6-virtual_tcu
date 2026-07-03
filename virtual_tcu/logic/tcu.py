@@ -81,6 +81,7 @@ class TCULogic:
         self._last_brake_time = 0.0
         self._last_hard_brake_time = 0.0
         self._last_downshift_time = 0.0
+        self._last_upshift_time = 0.0
         self._last_packet_time = 0.0
         self._prev_gear = -1
         self._we_shifted = False
@@ -584,10 +585,9 @@ class TCULogic:
         self._sync_profile_tune_id(td)
         self._calibrator.observe(td)
 
-        self._rev_limiter.observe(td, self._last_downshift_time, now)
-        real_redline = self._rev_limiter.effective_redline(td)
-        if real_redline is not None and td.engine_max_rpm * 0.5 < real_redline <= td.engine_max_rpm:
-            td.engine_max_rpm = real_redline
+        self._rev_limiter.observe(
+            td, self._last_downshift_time, now, last_upshift_time=self._last_upshift_time
+        )
 
         if self._config.get("feat_power_curve"):
             self._power_curve.observe(td)
@@ -736,6 +736,21 @@ class TCULogic:
         elif m == Mode.OFFROAD:
             self._mode_offroad(td, now)
 
+    def _rev_ceiling(self, td: Telemetry) -> float:
+        """RPM ceiling for over-rev guards.
+
+        Shift timing and power-curve learning always use the game's nominal
+        ``engine_max_rpm``. A learned fuel-cut RPM is applied here only when
+        it is plausibly at the real limiter (not a TCU upshift plateau)."""
+        nominal = td.engine_max_rpm
+        if nominal <= 0:
+            return nominal
+        learned = self._rev_limiter.effective_redline(td)
+        min_commit = nominal * self._rev_limiter.MIN_COMMIT_NOMINAL_FRAC
+        if learned is not None and nominal * 0.5 < learned <= nominal and learned >= min_commit:
+            return learned
+        return nominal
+
     def _shift_up(
         self,
         td: Telemetry,
@@ -770,6 +785,7 @@ class TCULogic:
             self._no_downshift_until = max(self._no_downshift_until, now + downshift_lock_s)
         self._we_shifted = True
         self._shift_count += 1
+        self._last_upshift_time = now
         self._kb.shift_to(td.gear, td.gear + 1)
         self._logger.mark_event()
         self._shift_history.record("UP", td, reason=state, rule=self.mode.value, sent_at=now)
@@ -799,7 +815,7 @@ class TCULogic:
         if projected is None:
             projected = td.current_rpm * (td.gear / max(td.gear - 1, 1))
 
-        if projected > td.engine_max_rpm * Cfg.OVER_REV_LIMIT:
+        if projected > self._rev_ceiling(td) * Cfg.OVER_REV_LIMIT:
             self._tcu_state = "OVER-REV BLOCKED"
             return False
 
@@ -843,7 +859,7 @@ class TCULogic:
         if projected is None:
             projected = td.current_rpm * (td.gear / max(td.gear - 2, 1))
 
-        if projected > td.engine_max_rpm * Cfg.OVER_REV_LIMIT:
+        if projected > self._rev_ceiling(td) * Cfg.OVER_REV_LIMIT:
             return False
 
         self._tcu_state = "BRAKE DOWN"
@@ -1256,7 +1272,7 @@ class TCULogic:
             if gear < 1 or gear > 10:
                 continue
             rpm_at_gear = ratio * speed
-            if rpm_at_gear > td.engine_max_rpm * 0.95:
+            if rpm_at_gear > self._rev_ceiling(td) * 0.95:
                 continue
             diff = abs(rpm_at_gear - target_rpm)
             if diff < best_diff:
@@ -1283,7 +1299,7 @@ class TCULogic:
             peak_power = max(peak_power, peak_torque)
             target_pct = peak_torque + (peak_power - peak_torque) * 0.45
         target_rpm = td.engine_max_rpm * target_pct
-        rev_ceiling = td.engine_max_rpm * min(Cfg.OVER_REV_LIMIT, 0.98)
+        rev_ceiling = self._rev_ceiling(td) * min(Cfg.OVER_REV_LIMIT, 0.98)
 
         best_gear = td.gear
         best_diff = float("inf")
