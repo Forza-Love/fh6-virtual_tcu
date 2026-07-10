@@ -20,7 +20,8 @@
     "package": "electron-vite build && electron-builder --win --publish never",
     "release": "electron-vite build && electron-builder --win --publish always",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test:hud": "node --experimental-strip-types src/hud-renderer/hud-rpm-segments.test.mjs"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
