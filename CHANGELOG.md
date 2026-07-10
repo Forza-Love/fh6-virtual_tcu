@@ -1,5 +1,25 @@
 # Changelog
 
+## [13.2.3] - 2026-07-10
+
+### Added
+
+- **GitHub issue templates** — bilingual Bug Report and Feature Request forms (`bug_report.yml`, `feature_request.yml`) with version, install method, component, reproduction steps, and environment checks; blank issues disabled via `config.yml`.
+- **Telemetry model** — parse `TireSlipAngle` (offset 164) and `TireCombinedSlip` (offset 180) from FH6 UDP into the `Telemetry` model (additive; no TCU logic consumes them yet).
+- **pytest** — `test_early_upshift_rev_limiter.py` for Race-mode upshift timing and false rev-limiter learning from TCU upshift plateaus (#62).
+
+### Changed
+
+- **Shift timing constants** — `LOW_GEAR_LOCK_MS` 800→400 ms; `UPSHIFT_PENDING_TIMEOUT_S` 1.2→0.7 s for faster upshift response (#61).
+- **Power curve confidence** — `HIGH_RPM_COVERAGE` 0.78→0.90; upshift point stays at or above the configured `race_up_wot` fallback while high-RPM coverage is missing or confidence is below 70%; mid-range-only parabola peaks are always rejected until high-RPM evidence exists.
+- **Cloud dev docs** — `AGENTS.md` clarifies Node 24 selection and dashboard smoke-test gotchas for cloud agents.
+
+### Fixed
+
+- **Tire slip offset (#56)** — read `TireSlipRatio` from byte offset **84** instead of 136 (`WheelInPuddleDepth`), fixing AWD dry-race `front_slip` stuck at 0.00 and restoring RWD wheelspin upshift and related slip-driven logic.
+- **Early upshift (#62)** — `RevLimiterDetector` no longer overwrites `td.engine_max_rpm`; ignore rev-limiter samples for 0.8 s after upshifts; commit learned fuel-cut only when bounce ≥97% of nominal redline; learned redline applies only in `_rev_ceiling()` over-rev guards while shift timing and power-curve learning use the game's nominal `engine_max_rpm`.
+- **HUD tach scale duplication (#66)** — deduplicate rounded RPM scale ticks and key Vue scale nodes by index so long sessions no longer accumulate repeated tach numbers when redline rounding collides (e.g. 6k → repeated 2/5).
+
 ## [13.2.2] - 2026-06-07
 
 ### Added
@@ -143,6 +163,26 @@
 ---
 
 # 更新日志
+
+## [13.2.3] - 2026-07-10
+
+### 新增
+
+- **GitHub Issue 模板** — 双语缺陷报告与功能请求表单（`bug_report.yml`、`feature_request.yml`），含版本、安装方式、组件、复现步骤与环境检查；`config.yml` 禁用空白 Issue。
+- **遥测模型** — 从 FH6 UDP 解析 `TireSlipAngle`（offset 164）与 `TireCombinedSlip`（offset 180）写入 `Telemetry` 模型（纯增量，TCU 逻辑暂未使用）。
+- **pytest** — `test_early_upshift_rev_limiter.py` 覆盖 Race 模式升档时机与 TCU 升档平台误学断油红线（#62）。
+
+### 变更
+
+- **换挡时序常量** — `LOW_GEAR_LOCK_MS` 800→400 ms；`UPSHIFT_PENDING_TIMEOUT_S` 1.2→0.7 s，升档响应更快（#61）。
+- **动力曲线置信度** — `HIGH_RPM_COVERAGE` 0.78→0.90；高转覆盖不足或置信度 <70% 时升档点不低于配置的 `race_up_wot` 回退值；无高转证据前一律拒绝中段抛物线峰值。
+- **Cloud 开发文档** — `AGENTS.md` 补充 Node 24 选择与 dashboard smoke 测试注意事项。
+
+### 修复
+
+- **轮胎滑移偏移 (#56)** — `TireSlipRatio` 改从字节 offset **84** 读取（原先误读 offset 136 的 `WheelInPuddleDepth`），修复 AWD 干地比赛 `front_slip` 恒为 0.00，恢复后驱打滑升档等依赖滑移的逻辑。
+- **过早升档 (#62)** — `RevLimiterDetector` 不再覆写 `td.engine_max_rpm`；升档后 0.8 s 内忽略断油样本；仅当 bounce ≥ 名义红线 97% 时才提交学习值； learned 红线仅用于 `_rev_ceiling()` 过转保护，换挡与动力曲线仍用游戏名义 `engine_max_rpm`。
+- **HUD 码表刻度重复 (#66)** — 去重舍入碰撞的 RPM 刻度标签，Vue 节点按索引绑定 key，长时间驾驶不再累积重复刻度数字（如 6k 红线出现重复 2/5）。
 
 ## [13.2.2] - 2026-06-07
 
