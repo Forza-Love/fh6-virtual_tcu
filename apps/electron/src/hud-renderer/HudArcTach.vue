@@ -34,7 +34,7 @@
       <text
         v-for="(t, i) in ARC_TACH_TICKS"
         v-show="showTicks"
-        :key="t"
+        :key="i"
         class="tick"
         :x="arcTachTickX(i)"
         y="112"

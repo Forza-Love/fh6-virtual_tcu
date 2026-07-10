@@ -25,7 +25,7 @@
 <template>
   <div class="rpm-segments" :class="`variant-${variant}`">
     <div v-if="variant === 'bar8' && showScale" class="scale-8">
-      <span v-for="t in ticks8" :key="t">{{ t }}</span>
+      <span v-for="(t, i) in ticks8" :key="i">{{ t }}</span>
     </div>
     <div
       class="seg-row"

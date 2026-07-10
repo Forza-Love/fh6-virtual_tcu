@@ -55,17 +55,28 @@ export function formatScaleK(value: number): string {
 
 /**
  * Racing bar scale: interior ticks are integers; last tick is car redline (×1000, 0.5 step, max 10).
+ *
+ * Rounded interior values can collide (e.g. 6k → "2"/"5" twice). Duplicates are dropped so
+ * Vue list keys stay unique — duplicate `:key` values previously caused scale DOM nodes to
+ * accumulate across long telemetry sessions.
  */
 export function buildRpmScaleTicks(count: number, rpmMax: number): string[] {
   if (count <= 0) return []
   const maxK = rpmMaxToScaleK(rpmMax)
-  if (count === 1) return [formatScaleK(maxK)]
+  const last = formatScaleK(maxK)
+  if (count === 1) return [last]
 
-  return Array.from({ length: count }, (_, i) => {
-    if (i === count - 1) return formatScaleK(maxK)
+  const ticks: string[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < count - 1; i++) {
     const raw = ((i + 1) / count) * maxK
-    return String(Math.round(raw))
-  })
+    const label = String(Math.round(raw))
+    if (seen.has(label) || label === last) continue
+    seen.add(label)
+    ticks.push(label)
+  }
+  ticks.push(last)
+  return ticks
 }
 
 export function pedalPct(value: number): number {
