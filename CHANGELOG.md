@@ -1,5 +1,18 @@
 # Changelog
 
+## [13.2.6-pre.1] - 2026-07-14
+
+> **Pre-release / 预发布测试版**
+>
+> Refines v13.2.5 upshift logic after user replay `跳一档.gz`: no more fixed 80% threshold on gears 1–2; uses RPM-ceiling detection instead. **Please test and report:** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+>
+> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。**请测试并反馈：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+
+### Fixed
+
+- **v13.2.5 regressions (user replay `跳一档.gz`)** — replace blanket `race_up_mid` fallback on gears 1–2 with `_rpm_ceiling_reached()` (tight plateau + low-gear speed wall); shift at measured ceiling (`peak - 1%`) instead of a flat 80%. Fixes launch wheelspin upshift at ~66% RPM (1st gear wheelspin disabled; 2nd/3rd only, RPM ≥ 72%) and restores post-brake upshifts when RPM plateaus below `race_up_wot`.
+- **pytest** — extend `test_low_gear_rpm_ceiling.py` with `跳一档.gz` replay regressions.
+
 ## [13.2.5] - 2026-07-14
 
 
@@ -179,6 +192,17 @@
 ---
 
 # 更新日志
+
+## [13.2.6-pre.1] - 2026-07-14
+
+> **预发布测试版**
+>
+> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。**请测试并反馈：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+
+### 修复
+
+- **v13.2.5 回归（用户 replay `跳一档.gz`）** — 用 `_rpm_ceiling_reached()`（紧 plateau + 低档速度墙）替代 1–2 档固定 `race_up_mid` 回退；在实测天花板（`peak - 1%`）升档，不再一律 80%。禁用 1 档打滑升档（仅 2–3 档、RPM ≥ 72%），修复起步 ~66% 过早升档；刹车后再加速时 RPM 触顶可恢复升档。
+- **pytest** — `test_low_gear_rpm_ceiling.py` 增加 `跳一档.gz` 回放回归。
 
 ## [13.2.5] - 2026-07-14
 

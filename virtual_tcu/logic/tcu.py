@@ -72,6 +72,7 @@ class TCULogic:
         self._brake_history = deque(maxlen=10)
         self._throttle_history = deque(maxlen=6)
         self._speed_history = deque(maxlen=20)
+        self._rpm_pct_history = deque(maxlen=14)
         self._brake_raw_history = deque(maxlen=10)
         self._throttle_raw_history = deque(maxlen=10)
         self._no_downshift_until = 0.0
@@ -527,6 +528,7 @@ class TCULogic:
             self._brake_history.clear()
             self._throttle_history.clear()
             self._speed_history.clear()
+            self._rpm_pct_history.clear()
             self._brake_raw_history.clear()
             self._throttle_raw_history.clear()
             self._tcu_state = "RESUMING"
@@ -542,6 +544,7 @@ class TCULogic:
             return
 
         if td.gear != self._prev_gear and 1 <= td.gear <= 10 and 1 <= self._prev_gear <= 10:
+            self._rpm_pct_history.clear()
             if td.gear > self._prev_gear:
                 self._upshift_cap_by_key[td.car_key] = 10
                 self._pending_upshift_from = None
@@ -565,6 +568,8 @@ class TCULogic:
         self._brake_history.append(td.brake)
         self._throttle_history.append(td.throttle)
         self._speed_history.append(td.speed_kmh)
+        if 1 <= td.gear <= 10 and td.throttle >= 0.75 and td.brake <= 0.05:
+            self._rpm_pct_history.append(td.rpm_pct)
         self._brake_raw_history.append(td.brake)
         self._throttle_raw_history.append(td.throttle)
 
@@ -1004,10 +1009,16 @@ class TCULogic:
             # still need a launch upshift when in-band RPM cannot reach WOT.
             self._slip_streak = 0
             return False
-        if td.gear < 1 or td.gear > 3:
+        if td.gear < 2 or td.gear > 3:
             self._slip_streak = 0
             return False
         if td.throttle < 0.40:
+            self._slip_streak = 0
+            return False
+        if td.gear <= 2 and td.rpm_pct < 0.72:
+            self._slip_streak = 0
+            return False
+        if td.gear == 1 and td.speed_kmh < 22.0:
             self._slip_streak = 0
             return False
 
@@ -1095,6 +1106,33 @@ class TCULogic:
         self._no_upshift_until = now + 0.8
         return True
 
+    def _rpm_ceiling_reached(self, td: Telemetry, wot_pct: float) -> bool:
+        """WOT but RPM stopped climbing before the configured WOT upshift point."""
+        if td.throttle < 0.85 or td.brake > 0.05:
+            return False
+        if td.speed_kmh <= Cfg.MIN_SPEED_KMH:
+            return False
+        if td.rpm_pct >= wot_pct - 0.015:
+            return False
+        if len(self._rpm_pct_history) < 10:
+            return False
+        recent = list(self._rpm_pct_history)[-10:]
+        peak = max(recent)
+        trough = min(recent)
+        if peak < 0.87:
+            return False
+        if peak >= wot_pct - 0.02:
+            return False
+        if td.rpm_pct < peak - 0.02:
+            return False
+        # Tight plateau: shift near the measured ceiling.
+        if peak - trough <= 0.025:
+            return True
+        # Low-gear speed wall: RPM oscillates but cannot approach WOT (issue logs).
+        if td.gear <= 2 and td.speed_kmh >= 40.0 and peak >= 0.855 and peak < wot_pct - 0.04:
+            return True
+        return False
+
     def _wot_upshift_fallback(self, td: Telemetry, *, mode: Mode | None = None) -> float:
         """WOT upshift RPM fraction for in-band timing and shift advisor."""
         m = mode if mode is not None else self.mode
@@ -1106,9 +1144,9 @@ class TCULogic:
             mid = self._config.get("race_up_mid", 80) / 100
         else:
             return self._config.get("comfort_up_wot", 82) / 100
-        # Long 1st/2nd gears often speed-limit before the WOT upshift point.
-        if td.gear <= 2:
-            return min(wot, mid)
+        if self._rpm_ceiling_reached(td, wot):
+            peak = max(list(self._rpm_pct_history)[-10:])
+            return min(wot, max(mid, peak - 0.01))
         return wot
 
     def _track_upshift_in_band(
