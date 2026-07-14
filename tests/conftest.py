@@ -12,9 +12,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-sys.modules.setdefault("keyboard", MagicMock())
-
 import virtual_tcu.logic.tcu as tcu_module
 from virtual_tcu.config.store import ConfigStore
 from virtual_tcu.input.interface import OutputInterface
@@ -22,6 +19,9 @@ from virtual_tcu.logic.tcu import TCULogic
 from virtual_tcu.storage.profiles import ProfileStore
 from virtual_tcu.telemetry.logger import TelemetryLogger
 from virtual_tcu.telemetry.model import Telemetry
+
+sys.modules.setdefault("keyboard", MagicMock())
+
 
 CAR_KEY_BASE = (100, 5, 800)
 

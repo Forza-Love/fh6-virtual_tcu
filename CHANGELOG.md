@@ -1,5 +1,23 @@
 # Changelog
 
+## [13.2.5] - 2026-07-14
+
+> **Testing requested / 需要实车测试反馈**
+>
+> Fixes Race-mode 1st-gear upshifts stuck when RPM plateaus below `race_up_wot` (94%) on long-geared tuned cars — validated against user replay logs via pytest, not yet re-tested in-game by the maintainer.
+>
+> **Send feedback:** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+>
+> 修复 Race 模式下一档转速触顶（约 89%）却达不到 94% 升档阈值导致永不升档的问题；已用用户 replay 日志做 pytest 回归，维护者尚未实车复测。
+>
+> **反馈邮箱：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+
+### Fixed
+
+- **Race 1st-gear RPM ceiling (#67 follow-up)** — gears 1–2 in Race/Offroad now cap the in-band upshift fallback to `race_up_mid` / `offroad_up_mid` when the WOT point is speed-limited below `race_up_wot`; fixes logs where AWD S1 cars held 1st at ~89% RPM with zero upshift commands issued.
+- **AWD/FWD wheelspin upshift during cold start** — power-curve cold-start block on wheelspin upshifts now applies to RWD only; AWD launch wheelspin can upshift again. Initialise `_slip_streak` in `TCULogic.__init__`.
+- **pytest** — `test_low_gear_rpm_ceiling.py` (synthetic + user `tcu_replay_20260714_*.bin.gz` replays).
+
 ## [13.2.4] - 2026-07-14
 
 > **Testing requested / 需要实车测试反馈**
@@ -180,6 +198,20 @@
 ---
 
 # 更新日志
+
+## [13.2.5] - 2026-07-14
+
+> **需要实车测试反馈**
+>
+> 修复 Race 模式下一档转速触顶（约 89%）却达不到 94% 升档阈值导致永不升档的问题；已用用户 replay 日志做 pytest 回归，维护者尚未实车复测。
+>
+> **反馈邮箱：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+
+### 修复
+
+- **Race 一档转速触顶 (#67 后续)** — Race/Offroad 的 1–2 档在-band 升档回退值降至 `race_up_mid` / `offroad_up_mid`，避免长齿比车辆全油门卡在 ~89% 却永远不发升档指令。
+- **冷启动 AWD/FWD 打滑升档** — 动力曲线未校准时，打滑升档禁用仅保留 RWD；AWD 起步大滑移可再次升档。`TCULogic.__init__` 初始化 `_slip_streak`。
+- **pytest** — `test_low_gear_rpm_ceiling.py`（合成场景 + 用户 `tcu_replay_20260714_*.bin.gz` 回放）。
 
 ## [13.2.4] - 2026-07-14
 

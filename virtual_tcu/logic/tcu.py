@@ -125,6 +125,7 @@ class TCULogic:
 
         self._launch_armed = False
         self._cornering_locked = False
+        self._slip_streak = 0
         self._down_held = False
         self._up_held = False
         self._paddle_keys: tuple[str, str] = ("", "")
@@ -993,9 +994,14 @@ class TCULogic:
     def _wheelspin_upshift_now(self, td: Telemetry) -> bool:
         if not self._config.get("feat_drivetrain_aware"):
             return False
-        if self._config.get("feat_power_curve") and self._power_curve.confidence(td.car_key) < 0.25:
+        if (
+            self._config.get("feat_power_curve")
+            and self._power_curve.confidence(td.car_key) < 0.25
+            and td.drivetrain == 1
+        ):
             # RWD wheelspin upshifts are a traction aid, not a shift-point
-            # signal — skip while the per-car curve is still cold.
+            # signal — skip while the per-car curve is still cold. FWD/AWD may
+            # still need a launch upshift when in-band RPM cannot reach WOT.
             self._slip_streak = 0
             return False
         if td.gear < 1 or td.gear > 3:
@@ -1089,6 +1095,22 @@ class TCULogic:
         self._no_upshift_until = now + 0.8
         return True
 
+    def _wot_upshift_fallback(self, td: Telemetry, *, mode: Mode | None = None) -> float:
+        """WOT upshift RPM fraction for in-band timing and shift advisor."""
+        m = mode if mode is not None else self.mode
+        if m == Mode.OFFROAD:
+            wot = self._config.get("offroad_up_wot", 90) / 100
+            mid = self._config.get("offroad_up_mid", 72) / 100
+        elif m == Mode.RACE:
+            wot = self._config.get("race_up_wot", 94) / 100
+            mid = self._config.get("race_up_mid", 80) / 100
+        else:
+            return self._config.get("comfort_up_wot", 82) / 100
+        # Long 1st/2nd gears often speed-limit before the WOT upshift point.
+        if td.gear <= 2:
+            return min(wot, mid)
+        return wot
+
     def _track_upshift_in_band(
         self,
         td: Telemetry,
@@ -1109,7 +1131,7 @@ class TCULogic:
         if td.speed_kmh <= Cfg.MIN_SPEED_KMH:
             return False
 
-        fallback = self._config.get("race_up_wot", 94) / 100
+        fallback = self._wot_upshift_fallback(td)
         target_pct = self._power_curve.optimal_upshift_rpm(td, fallback=fallback, offset=offset)
         if td.rpm_pct < target_pct:
             return False
@@ -1204,11 +1226,11 @@ class TCULogic:
 
         if base_mode == Mode.RACE:
             up_pct = self._power_curve.optimal_upshift_rpm(
-                td, fallback=self._config.get("race_up_wot", 94) / 100, offset=0.03
+                td, fallback=self._wot_upshift_fallback(td, mode=base_mode), offset=0.03
             )
         elif base_mode == Mode.OFFROAD:
             up_pct = self._power_curve.optimal_upshift_rpm(
-                td, fallback=self._config.get("offroad_up_wot", 90) / 100, offset=0.07
+                td, fallback=self._wot_upshift_fallback(td, mode=base_mode), offset=0.07
             )
         elif base_mode == Mode.DRIFT:
             up_pct = self._config.get("drift_up", 92) / 100

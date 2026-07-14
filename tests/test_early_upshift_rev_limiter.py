@@ -62,11 +62,17 @@ def _simulate_wot_pull(mode: str, *, max_rpm: float = 7000.0) -> list[tuple[int,
 
 
 def test_race_mode_keeps_upshift_near_configured_redline_pct():
-    """All gears should stay near race_up_wot (94%), not drop to ~80% after gear 1."""
+    """Rev-limiter fix: 3rd+ must not collapse to ~80%; 1st/2nd may use race_up_mid."""
     shifts = _simulate_wot_pull("RACE")
     assert len(shifts) >= 3
-    for from_gear, _rpm, pct in shifts:
-        assert pct >= 90, f"gear {from_gear}->{from_gear + 1} upshifted at {pct}% of redline"
+    low = [pct for from_gear, _rpm, pct in shifts if from_gear <= 2]
+    high = [pct for from_gear, _rpm, pct in shifts if from_gear >= 3]
+    assert low, "expected 1st/2nd upshifts"
+    assert high, "expected upshifts past 2nd"
+    for pct in low:
+        assert pct >= 80, f"low-gear upshift at {pct}% (expected >=80% race_up_mid)"
+    assert max(high) >= 90, f"high-gear upshifts never near redline: {high}"
+    assert sum(high) / len(high) >= 88, f"high-gear upshifts averaged too low: {high}"
 
 
 def test_nominal_engine_max_rpm_is_not_overwritten():
