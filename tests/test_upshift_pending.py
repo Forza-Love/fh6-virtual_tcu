@@ -22,7 +22,9 @@ def test_upshift_pending_blocks_repeat(make_logic, out, clock):
         accel_raw=255,
         brake_raw=0,
     )
-    for _ in range(120):
+    # Stay inside the pending window (0.7 s) — soft-cap retry after timeout is
+    # covered by test_failed_low_gear_upshift_retries_at_redline.
+    for _ in range(40):
         clock.now += 0.016
         out.now = clock.now
         tcu.process(td)

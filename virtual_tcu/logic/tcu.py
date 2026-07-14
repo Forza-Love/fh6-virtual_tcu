@@ -182,10 +182,21 @@ class TCULogic:
         self._upshift_cap_set_at.pop(ck, None)
 
     def _resolve_pending_upshift(self, td: Telemetry, now: float) -> None:
-        """Clear or cap upshift targets once the game confirms or rejects a shift."""
+        """Clear or cap upshift targets once the game confirms or rejects a shift.
+
+        Forza encodes an in-progress shift as ``gear > 10`` (see parser). That
+        must *not* count as confirmation — otherwise pending clears while the
+        car is still in the old gear and a second UP can fire (gear skip / hunt,
+        issue #67). While mid-shift, extend the deadline instead of timing out.
+        """
         if self._pending_upshift_from is None:
             return
-        if td.gear > self._pending_upshift_from:
+        if td.is_shifting or td.gear > 10:
+            if now >= self._pending_upshift_until:
+                self._pending_upshift_until = now + 0.35
+                self._no_upshift_until = max(self._no_upshift_until, self._pending_upshift_until)
+            return
+        if 1 <= td.gear <= 10 and td.gear > self._pending_upshift_from:
             self._pending_upshift_from = None
             self._pending_upshift_until = 0.0
             if td.car_key[0] > 0:
@@ -195,7 +206,7 @@ class TCULogic:
             return
         if now >= self._pending_upshift_until:
             ck = td.car_key
-            if ck[0] > 0:
+            if ck[0] > 0 and 1 <= td.gear <= 10:
                 self._upshift_cap_by_key[ck] = min(self._upshift_cap_by_key.get(ck, 10), td.gear)
                 if td.gear < Cfg.UPSHIFT_CAP_HARD_FROM_GEAR:
                     self._upshift_cap_set_at[ck] = now
@@ -203,6 +214,7 @@ class TCULogic:
                     self._upshift_cap_set_at.pop(ck, None)
             self._pending_upshift_from = None
             self._pending_upshift_until = 0.0
+            self._we_shifted = False
 
     def _maybe_retry_upshift_cap(self, td: Telemetry, now: float) -> None:
         """Clear a soft low-gear upshift cap when the car is still demanding power."""
@@ -528,7 +540,7 @@ class TCULogic:
             self._tcu_state_sub = "Forza mid-shift"
             return
 
-        if td.gear != self._prev_gear and td.gear > 0 and self._prev_gear > 0:
+        if td.gear != self._prev_gear and 1 <= td.gear <= 10 and 1 <= self._prev_gear <= 10:
             if td.gear > self._prev_gear:
                 self._upshift_cap_by_key[td.car_key] = 10
                 self._pending_upshift_from = None
@@ -542,8 +554,12 @@ class TCULogic:
                 # Record manual intervention in fusion log
                 if self._config.get("feat_fusion_logger"):
                     self._fusion_logger.trigger_snapshot("manual_shift")
-        self._prev_gear = td.gear
-        self._we_shifted = False
+            # Consume after the gear-change frame — `_shift_up/down` set this True
+            # on the keypress frame, which is always *before* telemetry shows the
+            # new gear. Clearing it every frame made every auto shift look manual.
+            self._we_shifted = False
+        if 1 <= td.gear <= 10:
+            self._prev_gear = td.gear
 
         self._brake_history.append(td.brake)
         self._throttle_history.append(td.throttle)
