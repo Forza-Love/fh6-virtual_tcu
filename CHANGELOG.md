@@ -2,15 +2,6 @@
 
 ## [13.2.5] - 2026-07-14
 
-> **Testing requested / 需要实车测试反馈**
->
-> Fixes Race-mode 1st-gear upshifts stuck when RPM plateaus below `race_up_wot` (94%) on long-geared tuned cars — validated against user replay logs via pytest, not yet re-tested in-game by the maintainer.
->
-> **Send feedback:** [becoolove@outlook.com](mailto:becoolove@outlook.com)
->
-> 修复 Race 模式下一档转速触顶（约 89%）却达不到 94% 升档阈值导致永不升档的问题；已用用户 replay 日志做 pytest 回归，维护者尚未实车复测。
->
-> **反馈邮箱：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
 
 ### Fixed
 
@@ -19,16 +10,6 @@
 - **pytest** — `test_low_gear_rpm_ceiling.py` (synthetic + user `tcu_replay_20260714_*.bin.gz` replays).
 
 ## [13.2.4] - 2026-07-14
-
-> **Testing requested / 需要实车测试反馈**
->
-> This release fixes a critical gear-hunting regression reported in #67. The patch is covered by new pytest regressions but **has not been validated in-game** by the maintainer. If you install v13.2.4, please report whether low-gear upshifts, gear skipping, and "stuck learning" behave correctly — especially on high-class / high-power cars in Race mode.
->
-> **Send feedback directly:** [becoolove@outlook.com](mailto:becoolove@outlook.com) (include version, car, tune, drive mode, and a short description or logs if possible).
->
-> 本版本修复 #67 报告的严重低档乱档问题，已通过新增 pytest 回归覆盖，但**维护者尚未在实车中验证**。若你安装 v13.2.4，请反馈低档自动升档、跳档与「一直 Learning」是否改善，尤其 Race 模式下的高等级/大马力车辆。
->
-> **请直接反馈至：** [becoolove@outlook.com](mailto:becoolove@outlook.com)（请注明版本、车辆、调教、驾驶模式，并尽量附上简要说明或日志）。
 
 ### Fixed
 
@@ -201,12 +182,6 @@
 
 ## [13.2.5] - 2026-07-14
 
-> **需要实车测试反馈**
->
-> 修复 Race 模式下一档转速触顶（约 89%）却达不到 94% 升档阈值导致永不升档的问题；已用用户 replay 日志做 pytest 回归，维护者尚未实车复测。
->
-> **反馈邮箱：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
-
 ### 修复
 
 - **Race 一档转速触顶 (#67 后续)** — Race/Offroad 的 1–2 档在-band 升档回退值降至 `race_up_mid` / `offroad_up_mid`，避免长齿比车辆全油门卡在 ~89% 却永远不发升档指令。
@@ -214,12 +189,6 @@
 - **pytest** — `test_low_gear_rpm_ceiling.py`（合成场景 + 用户 `tcu_replay_20260714_*.bin.gz` 回放）。
 
 ## [13.2.4] - 2026-07-14
-
-> **需要实车测试反馈**
->
-> 本版本修复 #67 报告的严重低档乱档问题，已通过新增 pytest 回归覆盖，但**维护者尚未在实车中验证**。若你安装 v13.2.4，请反馈低档自动升档、跳档与「一直 Learning」是否改善，尤其 Race 模式下的高等级/大马力车辆。
->
-> **请直接反馈至：** [becoolove@outlook.com](mailto:becoolove@outlook.com)（请注明版本、车辆、调教、驾驶模式，并尽量附上简要说明或日志）。
 
 ### 修复
 
