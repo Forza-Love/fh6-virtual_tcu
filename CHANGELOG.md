@@ -1,5 +1,22 @@
 # Changelog
 
+## [13.2.4] - 2026-07-14
+
+> **Testing requested / 需要实车测试反馈**
+>
+> This release fixes a critical gear-hunting regression reported in #67. The patch is covered by new pytest regressions but **has not been validated in-game** by the maintainer. If you install v13.2.4, please report whether low-gear upshifts, gear skipping, and "stuck learning" behave correctly — especially on high-class / high-power cars in Race mode.
+>
+> **Send feedback directly:** [becoolove@outlook.com](mailto:becoolove@outlook.com) (include version, car, tune, drive mode, and a short description or logs if possible).
+>
+> 本版本修复 #67 报告的严重低档乱档问题，已通过新增 pytest 回归覆盖，但**维护者尚未在实车中验证**。若你安装 v13.2.4，请反馈低档自动升档、跳档与「一直 Learning」是否改善，尤其 Race 模式下的高等级/大马力车辆。
+>
+> **请直接反馈至：** [becoolove@outlook.com](mailto:becoolove@outlook.com)（请注明版本、车辆、调教、驾驶模式，并尽量附上简要说明或日志）。
+
+### Fixed
+
+- **Low-gear hunting / stuck upshifts (#67)** — Forza mid-shift telemetry (`gear > 10`) no longer clears the pending upshift gate while the car is still in the previous gear; the pending deadline extends during in-progress shifts instead of timing out into a second UP that skips gears. `_we_shifted` is no longer cleared on the keypress frame so slow game acknowledgements do not permanently brick low-gear auto upshifts.
+- **pytest** — `test_issue67_low_gear_hunting.py` covers mid-shift encoding, slow-ack timeout recovery, and fast-car gear-skip regression paths.
+
 ## [13.2.3] - 2026-07-10
 
 ### Added
@@ -163,6 +180,19 @@
 ---
 
 # 更新日志
+
+## [13.2.4] - 2026-07-14
+
+> **需要实车测试反馈**
+>
+> 本版本修复 #67 报告的严重低档乱档问题，已通过新增 pytest 回归覆盖，但**维护者尚未在实车中验证**。若你安装 v13.2.4，请反馈低档自动升档、跳档与「一直 Learning」是否改善，尤其 Race 模式下的高等级/大马力车辆。
+>
+> **请直接反馈至：** [becoolove@outlook.com](mailto:becoolove@outlook.com)（请注明版本、车辆、调教、驾驶模式，并尽量附上简要说明或日志）。
+
+### 修复
+
+- **低档乱档 / 升档卡死 (#67)** — Forza 换挡中遥测（`gear > 10`）不再在车辆仍处原档时清除 pending 升档门闩；换挡进行中延长等待截止时间，避免超时后再发第二次 UP 导致跳档。`_we_shifted` 不再在按键当帧清除，慢速游戏确认不会永久锁死低档自动升档。
+- **pytest** — `test_issue67_low_gear_hunting.py` 覆盖换挡中编码、慢确认超时恢复与高马力跳档回归路径。
 
 ## [13.2.3] - 2026-07-10
 
