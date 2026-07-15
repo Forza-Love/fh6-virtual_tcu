@@ -570,6 +570,8 @@ class TCULogic:
         self._speed_history.append(td.speed_kmh)
         if 1 <= td.gear <= 10 and td.throttle >= 0.75 and td.brake <= 0.05:
             self._rpm_pct_history.append(td.rpm_pct)
+        else:
+            self._rpm_pct_history.clear()
         self._brake_raw_history.append(td.brake)
         self._throttle_raw_history.append(td.throttle)
 
@@ -871,17 +873,18 @@ class TCULogic:
         return True
 
     def _shift_down_double(self, td: Telemetry, lock_ms: int, target: int) -> bool:
-        if td.gear <= 2:
+        if td.gear <= 2 or target < 1 or target >= td.gear - 1:
             return False
         now = time.time()
         if now < self._no_downshift_until:
             return False
 
-        projected = self._calibrator.project_rpm_after_shift(td, td.gear - 2)
+        projected = self._calibrator.project_rpm_after_shift(td, target)
         if projected is None:
-            projected = td.current_rpm * (td.gear / max(td.gear - 2, 1))
+            return False
 
         if projected > self._rev_ceiling(td) * Cfg.OVER_REV_LIMIT:
+            self._tcu_state = "OVER-REV BLOCKED"
             return False
 
         self._tcu_state = "BRAKE DOWN"
@@ -889,7 +892,8 @@ class TCULogic:
         self._lock_until = now + (lock_ms / 1000.0)
         self._no_downshift_until = now + 0.30
         self._we_shifted = True
-        self._shift_count += 2
+        gears_crossed = td.gear - target
+        self._shift_count += gears_crossed
         self._last_downshift_time = now
         self._kb.shift_to(td.gear, target)
         self._logger.mark_event()
@@ -900,8 +904,8 @@ class TCULogic:
             rule=self.mode.value,
             sent_at=now,
         )
-        self._session_stats.record_shift("DOWN", "BRAKE DOWN")
-        self._session_stats.record_shift("DOWN", "BRAKE DOWN")
+        for _ in range(gears_crossed):
+            self._session_stats.record_shift("DOWN", "BRAKE DOWN")
         if self._config.get("feat_fusion_logger"):
             self._fusion_logger.trigger_snapshot("auto_double_down")
         if WINSOUND_OK and self._config.get("feat_sound_beep"):
@@ -1048,6 +1052,13 @@ class TCULogic:
         projected_speed = td.speed_kmh * (1.0 - brake_margin)
         target = self._target_gear_for_braking(td, speed_override=projected_speed)
 
+        if target is not None and target < td.gear:
+            target = self._safe_brake_target_at_current_speed(td, target)
+            if target >= td.gear:
+                self._tcu_state = "BRAKE HOLD"
+                self._tcu_state_sub = "target over-rev"
+                return False
+
         if target is not None and target >= td.gear:
             if not (td.rpm_pct < 0.50 and td.brake > 0.70):
                 return False
@@ -1069,6 +1080,22 @@ class TCULogic:
 
         self._no_upshift_until = now + 0.5
         return True
+
+    def _safe_brake_target_at_current_speed(self, td: Telemetry, target: int) -> int:
+        """Clamp a future-speed brake target to a safe gear right now.
+
+        Brake target selection anticipates speed scrub, but the shift command is
+        sent immediately. Walk upward from the desired gear until its learned
+        ratio lands below the brake-down ceiling at the current road speed.
+        """
+        ceiling = self._rev_ceiling(td) * 0.98
+        for candidate in range(max(1, target), td.gear):
+            projected = self._calibrator.project_rpm_after_shift(td, candidate)
+            if projected is None:
+                continue
+            if projected <= ceiling:
+                return candidate
+        return td.gear
 
     def _track_out_of_band_kickdown(
         self, td: Telemetry, now: float, climb_only: bool = False
@@ -1093,13 +1120,8 @@ class TCULogic:
 
         # Anti-hunting: don't downshift if the target gear would already be near
         # the upshift threshold — that would produce an immediate re-upshift.
-        car_ratios = self._calibrator.get_ratios(td.car_key)
-        if car_ratios and td.gear - 1 in car_ratios and td.engine_max_rpm > 0:
-            pct_in_target = car_ratios[td.gear - 1] * td.speed_kmh / td.engine_max_rpm
-            up_fallback = self._config.get("race_up_wot", 94) / 100
-            up_pct = self._power_curve.optimal_upshift_rpm(td, fallback=up_fallback, offset=0.03)
-            if pct_in_target >= up_pct - 0.08:
-                return False
+        if self._downshift_would_hunt(td, td.gear - 1):
+            return False
 
         if not self._shift_down(td, 400, "BAND DOWN", "climb" if climbing else "out of band"):
             return False
@@ -1125,6 +1147,10 @@ class TCULogic:
             return False
         if td.rpm_pct < peak - 0.02:
             return False
+        early_avg = sum(recent[:3]) / 3
+        late_avg = sum(recent[-3:]) / 3
+        if late_avg - early_avg > 0.01:
+            return False
         # Tight plateau: shift near the measured ceiling.
         if peak - trough <= 0.025:
             return True
@@ -1148,6 +1174,20 @@ class TCULogic:
             peak = max(list(self._rpm_pct_history)[-10:])
             return min(wot, max(mid, peak - 0.01))
         return wot
+
+    def _anti_hunt_upshift_pct(self, td: Telemetry) -> float:
+        """Return the effective upshift point used to guard a downshift."""
+        fallback = self._wot_upshift_fallback(td)
+        offset = 0.07 if self.mode == Mode.OFFROAD else 0.03
+        return self._power_curve.optimal_upshift_rpm(td, fallback=fallback, offset=offset)
+
+    def _downshift_would_hunt(self, td: Telemetry, target: int) -> bool:
+        """Whether *target* lands inside the effective upshift guard band."""
+        car_ratios = self._calibrator.get_ratios(td.car_key)
+        if target not in car_ratios or td.engine_max_rpm <= 0:
+            return False
+        pct_in_target = car_ratios[target] * td.speed_kmh / td.engine_max_rpm
+        return pct_in_target >= self._anti_hunt_upshift_pct(td) - 0.08
 
     def _track_upshift_in_band(
         self,
@@ -1430,21 +1470,14 @@ class TCULogic:
         # Anti-hunting guard: if the target gear would land us at or above the
         # upshift threshold (within an 8% hysteresis buffer), the downshift would
         # immediately trigger a re-upshift and create gear hunting.
-        car_ratios = self._calibrator.get_ratios(td.car_key)
-        if car_ratios and target in car_ratios and td.engine_max_rpm > 0:
-            rpm_in_target = car_ratios[target] * td.speed_kmh
-            pct_in_target = rpm_in_target / td.engine_max_rpm
-            up_fallback = self._config.get("race_up_wot", 94) / 100
-            up_pct = self._power_curve.optimal_upshift_rpm(td, fallback=up_fallback, offset=0.03)
-            if pct_in_target >= up_pct - 0.08:
-                return False
+        if self._downshift_would_hunt(td, target):
+            return False
 
         # Allow at most a double-down so we don't stack inputs on one demand.
         if target <= td.gear - 2 and td.gear >= 4:
             if self._shift_down_double(td, lock_ms, max(target, td.gear - 2)):
                 self._no_upshift_until = now + 0.5
                 return True
-            return False
 
         sub = f"→{target}" if target < td.gear - 1 else "demand power"
         if not self._shift_down(td, lock_ms, "RACE POWER DOWN", sub, cascade_lock_s=cascade_lock_s):
@@ -1741,6 +1774,10 @@ class TCULogic:
 
         down_rpm = self._config.get("offroad_down_rpm", 55) / 100
         if thr >= 0.40 and td.rpm_pct < down_rpm and td.gear > 1 and td.speed_kmh > 8.0:
+            if self._downshift_would_hunt(td, td.gear - 1):
+                self._tcu_state = "OFFROAD"
+                self._tcu_state_sub = "hold gear — near upshift"
+                return
             self._shift_down(td, 450, "TORQUE DOWN", "climbing")
             self._no_upshift_until = now + 1.5
             return

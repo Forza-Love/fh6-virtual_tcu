@@ -67,6 +67,39 @@ def test_race_climbing_rpm_does_not_use_mid_fallback(make_logic, out, clock):
     assert ups == []
 
 
+def test_race_stale_plateau_does_not_shift_on_next_pull(make_logic, out, clock):
+    """A throttle lift must break plateau history before the next WOT pull."""
+    tcu = make_logic("RACE", seed_ratios=False)
+    tcu._rpm_pct_history.extend([0.88] * 10)
+
+    lifted = make_telemetry(
+        gear=2,
+        current_rpm=6000.0,
+        engine_max_rpm=8000.0,
+        speed_ms=90.0 / 3.6,
+        accel_raw=0,
+        brake_raw=0,
+    )
+    clock.now += 0.016
+    out.now = clock.now
+    tcu.process(lifted)
+    assert list(tcu._rpm_pct_history) == []
+
+    rising = make_telemetry(
+        gear=2,
+        current_rpm=7000.0,
+        engine_max_rpm=8000.0,
+        speed_ms=90.0 / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+    )
+    clock.now += 0.016
+    out.now = clock.now
+    tcu.process(rising)
+
+    assert [s for s in out.shifts if s[0] == "UP"] == []
+
+
 def test_awd_wheelspin_upshift_requires_launch_pull(make_logic, out, clock):
     """AWD wheelspin upshift waits for meaningful RPM/speed, not spin at 62%."""
     tcu = make_logic("RACE", seed_ratios=False)
@@ -220,3 +253,43 @@ def test_skip_post_brake_recovers_upshifts(monkeypatch, tmp_path):
             ups_after_brake += sum(1 for s in out.shifts[before:] if s[0] == "UP")
 
     assert ups_after_brake >= 2, "expected upshifts after brake sequence when back on power"
+
+
+@pytest.mark.skipif(not _SKIP_LOG.is_file(), reason="跳一档.gz not in logs/")
+def test_skip_brake_downshifts_land_below_safety_ceiling(monkeypatch, tmp_path):
+    """跳一档.gz: brake commands with learned ratios must land at or below 98%."""
+    from tests.conftest import FakeOutput
+
+    out = FakeOutput()
+    cfg = ConfigStore(path=str(tmp_path / "cfg.json"))
+    prof = ProfileStore(path=str(tmp_path / "prof.json"))
+    tcu = TCULogic(out, prof, cfg, TelemetryLogger())
+    tcu.set_mode("RACE")
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(tcu_module.time, "time", lambda: clock["now"])
+    current_td = {"value": None}
+    landing_pcts = []
+    record_shift = out.shift_to
+
+    def capture_shift(from_gear, target_gear):
+        td = current_td["value"]
+        if td is not None and target_gear < from_gear and tcu._tcu_state == "BRAKE DOWN":
+            projected = tcu._calibrator.project_rpm_after_shift(td, target_gear)
+            if projected is not None:
+                landing_pcts.append(projected / tcu._rev_ceiling(td))
+        record_shift(from_gear, target_gear)
+
+    out.shift_to = capture_shift
+
+    for rel_ms, raw in iter_replay_records(_SKIP_LOG):
+        td = parse_fh6_packet(raw)
+        if td is None:
+            continue
+        clock["now"] = rel_ms / 1000.0
+        out.now = clock["now"]
+        current_td["value"] = td
+        tcu.process(td)
+
+    assert landing_pcts, "expected ratio-aware brake downshifts in issue replay"
+    assert max(landing_pcts) <= 0.98 + 1e-6, landing_pcts
