@@ -73,6 +73,8 @@ class TCULogic:
         self._throttle_history = deque(maxlen=6)
         self._speed_history = deque(maxlen=20)
         self._rpm_pct_history = deque(maxlen=14)
+        self._load_plateau_key: tuple[tuple, int, str] | None = None
+        self._load_plateau_since = 0.0
         self._brake_raw_history = deque(maxlen=10)
         self._throttle_raw_history = deque(maxlen=10)
         self._no_downshift_until = 0.0
@@ -529,6 +531,7 @@ class TCULogic:
             self._throttle_history.clear()
             self._speed_history.clear()
             self._rpm_pct_history.clear()
+            self._reset_load_plateau()
             self._brake_raw_history.clear()
             self._throttle_raw_history.clear()
             self._tcu_state = "RESUMING"
@@ -1026,12 +1029,7 @@ class TCULogic:
             self._slip_streak = 0
             return False
 
-        if td.drivetrain == 0:  # FWD
-            slip = max(td.slip_fl, td.slip_fr)
-        elif td.drivetrain == 1:  # RWD
-            slip = max(td.slip_rl, td.slip_rr)
-        else:  # AWD or unknown
-            slip = max(td.slip_fl, td.slip_fr, td.slip_rl, td.slip_rr)
+        slip = self._driven_wheel_slip(td)
 
         if slip > 1.2:
             self._slip_streak += 1
@@ -1128,6 +1126,53 @@ class TCULogic:
         self._no_upshift_until = now + 0.8
         return True
 
+    @staticmethod
+    def _driven_wheel_slip(td: Telemetry) -> float:
+        if td.drivetrain == 0:
+            return max(td.slip_fl, td.slip_fr)
+        if td.drivetrain == 1:
+            return max(td.slip_rl, td.slip_rr)
+        return max(td.slip_fl, td.slip_fr, td.slip_rl, td.slip_rr)
+
+    def _reset_load_plateau(self) -> None:
+        self._load_plateau_key = None
+        self._load_plateau_since = 0.0
+
+    def _high_gear_load_plateau_reached(
+        self,
+        td: Telemetry,
+        mid: float,
+        mode: Mode,
+        now: float,
+    ) -> bool:
+        key = (td.car_key, td.gear, mode.value)
+        valid_load = (
+            td.gear >= 3
+            and td.throttle >= 0.85
+            and td.brake <= 0.05
+            and td.rpm_pct >= mid
+            and self._driven_wheel_slip(td) <= 0.8
+            and len(self._rpm_pct_history) >= 10
+            and len(self._speed_history) >= 15
+        )
+        if not valid_load:
+            self._reset_load_plateau()
+            return False
+
+        rpm = list(self._rpm_pct_history)[-10:]
+        speed = list(self._speed_history)[-15:]
+        rpm_growth = sum(rpm[-3:]) / 3 - sum(rpm[:3]) / 3
+        speed_growth = speed[-1] - speed[0]
+        if rpm_growth > 0.005 or speed_growth > 0.8:
+            self._reset_load_plateau()
+            return False
+
+        if self._load_plateau_key != key:
+            self._load_plateau_key = key
+            self._load_plateau_since = now
+            return False
+        return now - self._load_plateau_since >= 1.0
+
     def _rpm_ceiling_reached(self, td: Telemetry, wot_pct: float) -> bool:
         """WOT but RPM stopped climbing before the configured WOT upshift point."""
         if td.throttle < 0.85 or td.brake > 0.05:
@@ -1170,7 +1215,17 @@ class TCULogic:
             mid = self._config.get("race_up_mid", 80) / 100
         else:
             return self._config.get("comfort_up_wot", 82) / 100
-        if self._rpm_ceiling_reached(td, wot):
+        if td.gear >= 3:
+            high_gear_plateau = self._high_gear_load_plateau_reached(
+                td,
+                mid,
+                m,
+                time.time(),
+            )
+        else:
+            self._reset_load_plateau()
+            high_gear_plateau = False
+        if self._rpm_ceiling_reached(td, wot) or high_gear_plateau:
             peak = max(list(self._rpm_pct_history)[-10:])
             return min(wot, max(mid, peak - 0.01))
         return wot
