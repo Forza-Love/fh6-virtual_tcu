@@ -1044,6 +1044,16 @@ class TCULogic:
             self._slip_streak = 0
             return False
 
+    def _race_wheelspin_landing_allowed(
+        self,
+        td: Telemetry,
+        power_floor: float,
+    ) -> bool:
+        projected = self._calibrator.project_rpm_after_shift(td, td.gear + 1)
+        if projected is None or td.engine_max_rpm <= 0:
+            return True
+        return projected / td.engine_max_rpm >= power_floor
+
     def _track_brake_down(
         self, td: Telemetry, now: float, brake_thr: float, lock_ms: int = 250
     ) -> bool:
@@ -1783,7 +1793,11 @@ class TCULogic:
         if self._track_coast_downshift(td, now, coast_rpm):
             return
 
-        if self._wheelspin_upshift_now(td) and td.speed_kmh > 15.0:
+        if (
+            self._wheelspin_upshift_now(td)
+            and td.speed_kmh > 15.0
+            and self._race_wheelspin_landing_allowed(td, power_floor)
+        ):
             self._shift_up(td, 400, "WHEELSPIN", "traction save", downshift_lock_s=0.5)
             return
 

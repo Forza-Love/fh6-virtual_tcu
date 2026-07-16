@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 
 import pytest
-from tests.conftest import feed, make_telemetry
+from tests.conftest import CAR_KEY, feed, make_telemetry
 from virtual_tcu.core.mode import Mode
 
 
@@ -202,3 +202,40 @@ def test_load_plateau_continuity_resets_on_transient(make_logic, out, clock, bre
 
     _feed_plateau(tcu, out, clock, td, 35)
     assert len(_upshifts(out)) == 1
+
+
+def _wheelspin_frame(*, speed_kmh: float = 80.0):
+    return make_telemetry(
+        gear=2,
+        current_rpm=0.80 * 8000,
+        engine_max_rpm=8000,
+        speed_ms=speed_kmh / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+        drivetrain=2,
+        slip_rl=2.0,
+        slip_rr=2.2,
+        profile_tune_id=CAR_KEY[3],
+    )
+
+
+def test_race_wheelspin_shift_is_blocked_below_power_floor(make_logic, out, clock):
+    tcu = make_logic("RACE")
+    td = _wheelspin_frame(speed_kmh=80.0)
+    tcu._tune_id_by_base[td.car_key_base] = CAR_KEY[3]
+    feed(tcu, out, clock, td, 6)
+    assert [kind for kind, _ in out.shifts if kind == "UP"] == []
+
+
+def test_race_wheelspin_shift_is_allowed_with_healthy_landing(make_logic, out, clock):
+    tcu = make_logic("RACE")
+    td = _wheelspin_frame(speed_kmh=90.0)
+    tcu._tune_id_by_base[td.car_key_base] = CAR_KEY[3]
+    feed(tcu, out, clock, td, 6)
+    assert [kind for kind, _ in out.shifts if kind == "UP"] == ["UP"]
+
+
+def test_race_wheelspin_preserves_ratio_less_fallback(make_logic, out, clock):
+    tcu = make_logic("RACE", seed_ratios=False)
+    feed(tcu, out, clock, _wheelspin_frame(speed_kmh=80.0), 6)
+    assert [kind for kind, _ in out.shifts if kind == "UP"] == ["UP"]
