@@ -75,6 +75,7 @@ class TCULogic:
         self._rpm_pct_history = deque(maxlen=14)
         self._load_plateau_key: tuple[tuple, int, str] | None = None
         self._load_plateau_since = 0.0
+        self._load_plateau_reached = False
         self._brake_raw_history = deque(maxlen=10)
         self._throttle_raw_history = deque(maxlen=10)
         self._no_downshift_until = 0.0
@@ -539,9 +540,17 @@ class TCULogic:
 
         self._last_packet_time = now
 
+        current_mode = self.mode
+        if current_mode != self._last_processed_mode:
+            self._last_processed_mode = current_mode
+            self._launch_armed = False
+            self._no_upshift_until = 0.0
+            self._reset_load_plateau()
+
         self._resolve_pending_upshift(td, now)
 
         if td.is_shifting:
+            self._observe_high_gear_load_plateau(td, current_mode, now)
             self._tcu_state = "SHIFTING"
             self._tcu_state_sub = "Forza mid-shift"
             return
@@ -582,6 +591,8 @@ class TCULogic:
             (sum(self._throttle_history) / max(1, len(self._throttle_history))) * 255
         )
         td.brake_raw = int((sum(self._brake_history) / max(1, len(self._brake_history))) * 255)
+
+        self._observe_high_gear_load_plateau(td, current_mode, now)
 
         if td.brake > 0.15:
             self._last_brake_time = now
@@ -682,13 +693,7 @@ class TCULogic:
 
         self._check_tune_ratio_drift(td)
 
-        current_mode = self.mode
-        if current_mode != self._last_processed_mode:
-            self._last_processed_mode = current_mode
-            self._launch_armed = False
-            self._no_upshift_until = 0.0
-
-        if self.mode == Mode.MANUAL:
+        if current_mode == Mode.MANUAL:
             self._tcu_state = "MANUAL"
             self._tcu_state_sub = "TCU off"
             if self._config.get("feat_shift_advisor"):
@@ -753,7 +758,7 @@ class TCULogic:
 
         self._maybe_retry_upshift_cap(td, now)
 
-        m = self.mode
+        m = current_mode
         if m == Mode.COMFORT:
             self._mode_comfort(td, now)
         elif m == Mode.RACE:
@@ -1137,17 +1142,26 @@ class TCULogic:
     def _reset_load_plateau(self) -> None:
         self._load_plateau_key = None
         self._load_plateau_since = 0.0
+        self._load_plateau_reached = False
 
-    def _high_gear_load_plateau_reached(
+    def _observe_high_gear_load_plateau(
         self,
         td: Telemetry,
-        mid: float,
         mode: Mode,
         now: float,
-    ) -> bool:
+    ) -> None:
+        if mode == Mode.OFFROAD:
+            mid = self._config.get("offroad_up_mid", 72) / 100
+        elif mode == Mode.RACE:
+            mid = self._config.get("race_up_mid", 80) / 100
+        else:
+            self._reset_load_plateau()
+            return
+
         key = (td.car_key, td.gear, mode.value)
         valid_load = (
-            td.gear >= 3
+            not td.is_shifting
+            and td.gear >= 3
             and td.throttle >= 0.85
             and td.brake <= 0.05
             and td.rpm_pct >= mid
@@ -1157,7 +1171,7 @@ class TCULogic:
         )
         if not valid_load:
             self._reset_load_plateau()
-            return False
+            return
 
         rpm = list(self._rpm_pct_history)[-10:]
         speed = list(self._speed_history)[-15:]
@@ -1165,13 +1179,14 @@ class TCULogic:
         speed_growth = speed[-1] - speed[0]
         if rpm_growth > 0.005 or speed_growth > 0.8:
             self._reset_load_plateau()
-            return False
+            return
 
         if self._load_plateau_key != key:
             self._load_plateau_key = key
             self._load_plateau_since = now
-            return False
-        return now - self._load_plateau_since >= 1.0
+            self._load_plateau_reached = False
+            return
+        self._load_plateau_reached = now - self._load_plateau_since >= 1.0
 
     def _rpm_ceiling_reached(self, td: Telemetry, wot_pct: float) -> bool:
         """WOT but RPM stopped climbing before the configured WOT upshift point."""
@@ -1215,16 +1230,11 @@ class TCULogic:
             mid = self._config.get("race_up_mid", 80) / 100
         else:
             return self._config.get("comfort_up_wot", 82) / 100
-        if td.gear >= 3:
-            high_gear_plateau = self._high_gear_load_plateau_reached(
-                td,
-                mid,
-                m,
-                time.time(),
-            )
-        else:
-            self._reset_load_plateau()
-            high_gear_plateau = False
+        high_gear_plateau = self._load_plateau_reached and self._load_plateau_key == (
+            td.car_key,
+            td.gear,
+            m.value,
+        )
         if self._rpm_ceiling_reached(td, wot) or high_gear_plateau:
             peak = max(list(self._rpm_pct_history)[-10:])
             return min(wot, max(mid, peak - 0.01))
