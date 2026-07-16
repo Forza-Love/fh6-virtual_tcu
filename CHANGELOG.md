@@ -1,5 +1,20 @@
 # Changelog
 
+## [13.2.6-pre.4] - 2026-07-16
+
+> **Pre-release**
+>
+> Corrects RPM-ceiling detection across the Lamborghini Huracán STO, Shelby Daytona, and cars whose reachable fuel cut is far below Forza's nominal maximum RPM.
+
+### Fixed
+
+- **STO high-gear early upshifts** — restrict the short-window RPM-ceiling fallback to gears 1–2 so normal slow RPM growth in gears 4–7 is no longer mistaken for an unreachable redline.
+- **Low nominal fuel-cut learning** — accept verified repeated limiter sawtooth patterns from 78% of nominal RPM upward, while rejecting one-off RPM drops, gear-transition carryover, wheelspin, and gradually moving peaks.
+- **Shelby third-gear recovery** — recognize the Daytona's approximately 89% real limiter and restore automatic `3→4` upshifts.
+- **Low-end long-red-zone vehicles** — learn approximately 84% reachable limiters, restore continuous `1→2→3` upshifts, and use the verified ceiling for over-rev protection so a valid upshift is not reversed immediately.
+- **Profile compatibility** — persist newly verified limiter values with a version marker; older low limiter values remain untrusted until confirmed live, preventing stale false learning from returning.
+- **Replay regressions** — add coverage for both STO logs, Shelby, and the high-red-zone low-end vehicle alongside the existing Ford, Pagani, brake, and low-gear suites.
+
 ## [13.2.6-pre.3] - 2026-07-16
 
 > **Pre-release**
@@ -206,6 +221,21 @@
 ---
 
 # 更新日志
+
+## [13.2.6-pre.4] - 2026-07-16
+
+> **预发布测试版**
+>
+> 修正 Lamborghini Huracán STO、Shelby Daytona，以及实际断油转速明显低于 Forza 名义最高转速车辆的红线识别。
+
+### 修复
+
+- **STO 高挡过早升挡** — 将短窗口转速触顶回退限制在 1–2 挡，4–7 挡正常但较慢的转速上升不再被误判为无法达到的红线。
+- **低于名义转速的断油识别** — 支持识别名义转速 78% 以上、重复出现的断油锯齿；同时排除单次转速跌落、跨挡残留、轮胎打滑与持续移动的峰值。
+- **Shelby 三挡恢复** — 识别 Daytona 约 89% 的实际断油红线，恢复自动 `3→4` 升挡。
+- **长红区低端车辆** — 学习约 84% 的可达红线，恢复连续 `1→2→3` 升挡，并将已验证红线用于降挡防超转，避免正确升挡后立即被软件降回。
+- **配置兼容** — 新确认的实际红线使用带版本标记的格式持久化；旧版较低红线在实时重新确认前不会被信任，防止历史误学习重新生效。
+- **回放回归** — 新增两份 STO、Shelby 与高红区低端车回放测试，并保留 Ford、Pagani、刹车与低挡测试覆盖。
 
 ## [13.2.6-pre.3] - 2026-07-16
 

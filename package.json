@@ -1,7 +1,7 @@
 {
   "name": "virtual-tcu-monorepo",
   "type": "module",
-  "version": "13.2.6-pre.3",
+  "version": "13.2.6-pre.4",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {
