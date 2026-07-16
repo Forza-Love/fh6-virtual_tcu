@@ -106,6 +106,21 @@ def test_sustained_high_gear_load_plateau_triggers_upshift(make_logic, out, cloc
     assert len(_upshifts(out)) == 1
 
 
+def test_sustained_plateau_uses_remapped_profile_key(make_logic, out, clock):
+    tcu = make_logic("RACE")
+    probe = _high_gear_plateau_telemetry()
+    remapped_profile_id = probe.tune_signature + 1
+    tcu._tune_id_by_base[probe.car_key_base] = remapped_profile_id
+
+    for _ in range(85):
+        td = _high_gear_plateau_telemetry()
+        td.profile_tune_id = 0
+        feed(tcu, out, clock, td, 1)
+
+    assert td.profile_tune_id == remapped_profile_id
+    assert len(_upshifts(out)) == 1
+
+
 def test_rising_high_gear_rpm_never_confirms_load_plateau(make_logic, out, clock):
     tcu = make_logic("RACE")
     td = _high_gear_plateau_telemetry()

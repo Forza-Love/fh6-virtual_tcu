@@ -550,7 +550,7 @@ class TCULogic:
         self._resolve_pending_upshift(td, now)
 
         if td.is_shifting:
-            self._observe_high_gear_load_plateau(td, current_mode, now)
+            self._reset_load_plateau()
             self._tcu_state = "SHIFTING"
             self._tcu_state_sub = "Forza mid-shift"
             return
@@ -591,8 +591,6 @@ class TCULogic:
             (sum(self._throttle_history) / max(1, len(self._throttle_history))) * 255
         )
         td.brake_raw = int((sum(self._brake_history) / max(1, len(self._brake_history))) * 255)
-
-        self._observe_high_gear_load_plateau(td, current_mode, now)
 
         if td.brake > 0.15:
             self._last_brake_time = now
@@ -668,12 +666,14 @@ class TCULogic:
 
         is_reverse_now = (td.gear == 0) or (td.vel_z < -1.5 and td.gear <= 1)
         if is_reverse_now:
+            self._reset_load_plateau()
             self._tcu_state = "REVERSE"
             self._tcu_state_sub = "TCU passive"
             self._reverse_lock_until = now + Cfg.REVERSE_EXIT_LOCK_S
             return
 
         if now < self._reverse_lock_until and not self._reverse_exit_allows_shifts(td):
+            self._reset_load_plateau()
             self._tcu_state = "REVERSE"
             self._tcu_state_sub = "exiting R..."
             return
@@ -692,6 +692,7 @@ class TCULogic:
             self._load_profiles(ck, td)
 
         self._check_tune_ratio_drift(td)
+        self._observe_high_gear_load_plateau(td, current_mode, now)
 
         if current_mode == Mode.MANUAL:
             self._tcu_state = "MANUAL"
