@@ -1175,11 +1175,26 @@ class TCULogic:
             return min(wot, max(mid, peak - 0.01))
         return wot
 
+    def _effective_upshift_pct(
+        self,
+        td: Telemetry,
+        offset: float,
+        *,
+        mode: Mode | None = None,
+    ) -> float:
+        """Bound the learned shift point by the configured/reachable fallback."""
+        fallback = self._wot_upshift_fallback(td, mode=mode)
+        learned = self._power_curve.optimal_upshift_rpm(
+            td,
+            fallback=fallback,
+            offset=offset,
+        )
+        return min(learned, fallback)
+
     def _anti_hunt_upshift_pct(self, td: Telemetry) -> float:
         """Return the effective upshift point used to guard a downshift."""
-        fallback = self._wot_upshift_fallback(td)
         offset = 0.07 if self.mode == Mode.OFFROAD else 0.03
-        return self._power_curve.optimal_upshift_rpm(td, fallback=fallback, offset=offset)
+        return self._effective_upshift_pct(td, offset)
 
     def _downshift_would_hunt(self, td: Telemetry, target: int) -> bool:
         """Whether *target* lands inside the effective upshift guard band."""
@@ -1209,8 +1224,7 @@ class TCULogic:
         if td.speed_kmh <= Cfg.MIN_SPEED_KMH:
             return False
 
-        fallback = self._wot_upshift_fallback(td)
-        target_pct = self._power_curve.optimal_upshift_rpm(td, fallback=fallback, offset=offset)
+        target_pct = self._effective_upshift_pct(td, offset)
         if td.rpm_pct < target_pct:
             return False
         return self._shift_up(td, 300, "UPSHIFT", "in band", downshift_lock_s=downshift_lock_s)
@@ -1303,13 +1317,9 @@ class TCULogic:
         base_mode = self._last_auto_mode
 
         if base_mode == Mode.RACE:
-            up_pct = self._power_curve.optimal_upshift_rpm(
-                td, fallback=self._wot_upshift_fallback(td, mode=base_mode), offset=0.03
-            )
+            up_pct = self._effective_upshift_pct(td, 0.03, mode=base_mode)
         elif base_mode == Mode.OFFROAD:
-            up_pct = self._power_curve.optimal_upshift_rpm(
-                td, fallback=self._wot_upshift_fallback(td, mode=base_mode), offset=0.07
-            )
+            up_pct = self._effective_upshift_pct(td, 0.07, mode=base_mode)
         elif base_mode == Mode.DRIFT:
             up_pct = self._config.get("drift_up", 92) / 100
         else:
