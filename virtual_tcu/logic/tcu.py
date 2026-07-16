@@ -1264,23 +1264,26 @@ class TCULogic:
             return 0.0
         return max(0.0, (td.gear - 2) * 20 + 15)
 
+    @staticmethod
+    def _turbo_target(td: Telemetry) -> float:
+        """Return boost demand on the normalized scale used by `_turbo_bar`."""
+        if 0.01 < td.boost_raw < 5.0:
+            return min(td.boost_raw, 1.8)
+        estimate = td.throttle * td.rpm_pct * 1.8
+        return max(0.0, min(estimate, 1.8))
+
     def _turbo_lag_block_upshift(self, td: Telemetry) -> bool:
         if not self._config.get("feat_turbo_compensate"):
             return False
-        if td.boost_raw < 0.3 or td.throttle < 0.50:
+        target = self._turbo_target(td)
+        if target < 0.3 or td.throttle < 0.50:
             return False
         if td.rpm_pct > 0.85:
             return False
-        if self._turbo_bar < td.boost_raw * 0.7:
-            return True
-        return False
+        return self._turbo_bar < target * 0.7
 
     def _update_turbo(self, td: Telemetry, dt: float):
-        if 0.01 < td.boost_raw < 5.0:
-            target = min(td.boost_raw, 1.8)
-        else:
-            target = td.throttle * td.rpm_pct * 1.8
-
+        target = self._turbo_target(td)
         if target > self._turbo_bar:
             self._turbo_bar += 3.5 * dt * (target - self._turbo_bar)
         else:

@@ -47,3 +47,24 @@ def test_advisor_and_anti_hunt_use_the_same_bounded_target(make_logic, monkeypat
     assert tcu._anti_hunt_upshift_pct(td) == pytest.approx(0.94)
     tcu._compute_shift_advisor(td)
     assert tcu._shift_advice == "up"
+
+
+def test_out_of_range_raw_boost_uses_normalized_estimate(make_logic):
+    tcu = make_logic("RACE")
+    td = make_telemetry(
+        current_rpm=0.80 * 8000,
+        engine_max_rpm=8000,
+        accel_raw=255,
+        boost_raw=12.0,
+    )
+
+    assert tcu._turbo_target(td) == pytest.approx(1.44)
+    for _ in range(100):
+        tcu._update_turbo(td, 0.016)
+    assert tcu._turbo_lag_block_upshift(td) is False
+
+
+def test_valid_raw_boost_remains_the_turbo_target(make_logic):
+    tcu = make_logic("RACE")
+    td = make_telemetry(boost_raw=1.2, accel_raw=255, current_rpm=6400)
+    assert tcu._turbo_target(td) == pytest.approx(1.2)
