@@ -17,6 +17,12 @@ from virtual_tcu.telemetry.replay_reader import iter_replay_records
 FORD = REPO_ROOT / "logs" / "tcu_replay_FordGT2005.bin.gz"
 PAGANI = REPO_ROOT / "logs" / "tcu_replay_PaganiHuayraR2021.bin.gz"
 BRAKE = REPO_ROOT / "logs" / "刹车降档卡到2档.bin.gz"
+STO_LOGS = [
+    REPO_ROOT / "logs" / "tcu_replay_sto_1.bin.gz",
+    REPO_ROOT / "logs" / "tcu_replay_sto_2.bin.gz",
+]
+SHELBY = REPO_ROOT / "logs" / "tcu_replay_Shelby.bin.gz"
+HIGH_REDLINE_LOW_END = REPO_ROOT / "logs" / "tcu_replay_高红区低端车.bin.gz"
 
 
 def _replay_commands(log_path: Path, monkeypatch, tmp_path) -> list[dict]:
@@ -101,3 +107,55 @@ def test_pagani_rejects_bad_skips_and_recovers_after_learning(monkeypatch, tmp_p
 def test_brake_replay_recovers_second_before_next_brake(monkeypatch, tmp_path):
     commands = _replay_commands(BRAKE, monkeypatch, tmp_path)
     assert [c for c in commands if c["from"] == 2 and c["to"] == 3 and 30_200 <= c["ms"] < 32_400]
+
+
+@pytest.mark.parametrize("log_path", STO_LOGS, ids=lambda path: path.name)
+def test_sto_high_gears_do_not_treat_slow_climb_as_limiter(log_path, monkeypatch, tmp_path):
+    if not log_path.is_file():
+        pytest.skip(f"{log_path.name} not in logs/")
+
+    commands = _replay_commands(log_path, monkeypatch, tmp_path)
+    early_high_gear = [
+        c
+        for c in commands
+        if 4 <= c["from"] <= 7 and c["to"] == c["from"] + 1 and c["rpm_pct"] < 0.89
+    ]
+
+    assert not early_high_gear, (
+        "normal high-gear RPM growth must not be treated as an unreachable ceiling; "
+        f"commands={early_high_gear}"
+    )
+    assert {c["from"] for c in commands if c["to"] == c["from"] + 1} >= {1, 2, 3}
+
+
+@pytest.mark.skipif(not SHELBY.is_file(), reason="Shelby replay not in logs/")
+def test_shelby_recovers_third_to_fourth_at_real_limiter(monkeypatch, tmp_path):
+    commands = _replay_commands(SHELBY, monkeypatch, tmp_path)
+    recoveries = [
+        c
+        for c in commands
+        if c["from"] == 3 and c["to"] == 4 and 6_225 <= c["ms"] < 10_507 and c["state"] == "UPSHIFT"
+    ]
+    assert recoveries, f"expected a limiter-driven 3->4 recovery; commands={commands}"
+
+
+@pytest.mark.skipif(
+    not HIGH_REDLINE_LOW_END.is_file(),
+    reason="high-redline low-end replay not in logs/",
+)
+def test_low_end_car_learns_low_nominal_limiter_and_keeps_upshifting(monkeypatch, tmp_path):
+    commands = _replay_commands(HIGH_REDLINE_LOW_END, monkeypatch, tmp_path)
+    assert [c for c in commands if c["from"] == 1 and c["to"] == 2 and c["ms"] < 7_612], (
+        f"expected 1->2 before the recorded manual shift; commands={commands}"
+    )
+    assert [c for c in commands if c["from"] == 2 and c["to"] == 3 and c["ms"] < 12_831], (
+        f"expected 2->3 before the recorded manual shift; commands={commands}"
+    )
+    assert not [
+        c
+        for c in commands
+        if c["from"] == 3
+        and c["to"] == 2
+        and 12_985 <= c["ms"] < 14_195
+        and c["state"] == "RACE POWER DOWN"
+    ]

@@ -182,6 +182,8 @@ class TCULogic:
         self._rev_limiter._redline.pop(ck, None)
         self._rev_limiter._rpm_window.pop(ck, None)
         self._rev_limiter._peak_hold.pop(ck, None)
+        self._rev_limiter._active_gear.pop(ck, None)
+        self._rev_limiter._verified.discard(ck)
         self._profile_baseline_gear1.pop(ck, None)
         self._upshift_cap_by_key.pop(ck, None)
         self._upshift_cap_set_at.pop(ck, None)
@@ -778,10 +780,9 @@ class TCULogic:
         nominal = td.engine_max_rpm
         if nominal <= 0:
             return nominal
-        learned = self._rev_limiter.effective_redline(td)
-        min_commit = nominal * self._rev_limiter.MIN_COMMIT_NOMINAL_FRAC
-        if learned is not None and nominal * 0.5 < learned <= nominal and learned >= min_commit:
-            return learned
+        learned_pct = self._trusted_rev_limiter_pct(td)
+        if learned_pct is not None:
+            return nominal * learned_pct
         return nominal
 
     def _shift_up(
@@ -1199,36 +1200,61 @@ class TCULogic:
             return
         self._load_plateau_reached = now - self._load_plateau_since >= 1.0
 
-    def _rpm_ceiling_reached(self, td: Telemetry, wot_pct: float) -> bool:
-        """WOT but RPM stopped climbing before the configured WOT upshift point."""
+    def _trusted_rev_limiter_pct(self, td: Telemetry) -> float | None:
+        nominal = td.engine_max_rpm
+        learned = self._rev_limiter.effective_redline(td)
+        if nominal <= 0 or learned is None:
+            return None
+        verified = self._rev_limiter.is_verified(td.car_key)
+        min_fraction = (
+            self._rev_limiter.MIN_COMMIT_NOMINAL_FRAC
+            if verified
+            else self._rev_limiter.LEGACY_MIN_COMMIT_NOMINAL_FRAC
+        )
+        pct = learned / nominal
+        if min_fraction <= pct <= 1.0:
+            return pct
+        return None
+
+    def _upshift_ceiling_pct(self, td: Telemetry, wot_pct: float) -> float | None:
+        """Return a confirmed reachable WOT ceiling below the configured point."""
+        learned_pct = self._trusted_rev_limiter_pct(td)
+        if learned_pct is not None and learned_pct < wot_pct - 0.005:
+            return learned_pct
+
+        # The short-window fallback is intentionally limited to 1st/2nd.
+        # In higher gears, ordinary acceleration slows enough to look flat for
+        # ten frames (STO logs), long before the engine reaches its limiter.
+        if td.gear > 2:
+            return None
         if td.throttle < 0.85 or td.brake > 0.05:
-            return False
+            return None
         if td.speed_kmh <= Cfg.MIN_SPEED_KMH:
-            return False
+            return None
         if td.rpm_pct >= wot_pct - 0.015:
-            return False
+            return None
         if len(self._rpm_pct_history) < 10:
-            return False
+            return None
         recent = list(self._rpm_pct_history)[-10:]
         peak = max(recent)
         trough = min(recent)
         if peak < 0.87:
-            return False
+            return None
         if peak >= wot_pct - 0.02:
-            return False
+            return None
         if td.rpm_pct < peak - 0.02:
-            return False
+            return None
         early_avg = sum(recent[:3]) / 3
         late_avg = sum(recent[-3:]) / 3
         if late_avg - early_avg > 0.01:
-            return False
+            return None
         # Tight plateau: shift near the measured ceiling.
         if peak - trough <= 0.025:
-            return True
+            return peak
         # Low-gear speed wall: RPM oscillates but cannot approach WOT (issue logs).
         if td.gear <= 2 and td.speed_kmh >= 40.0 and peak >= 0.855 and peak < wot_pct - 0.04:
-            return True
-        return False
+            return peak
+        return None
 
     def _wot_upshift_fallback(self, td: Telemetry, *, mode: Mode | None = None) -> float:
         """WOT upshift RPM fraction for in-band timing and shift advisor."""
@@ -1246,9 +1272,12 @@ class TCULogic:
             td.gear,
             m.value,
         )
-        if self._rpm_ceiling_reached(td, wot) or high_gear_plateau:
-            peak = max(list(self._rpm_pct_history)[-10:])
-            return min(wot, max(mid, peak - 0.01))
+        ceiling_pct = self._upshift_ceiling_pct(td, wot)
+        if ceiling_pct is not None:
+            return min(wot, max(mid, ceiling_pct - 0.01))
+        if high_gear_plateau:
+            observed_peak = max(list(self._rpm_pct_history)[-10:])
+            return min(wot, max(mid, observed_peak - 0.01))
         return wot
 
     def _effective_upshift_pct(

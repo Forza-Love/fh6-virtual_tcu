@@ -67,6 +67,69 @@ def test_race_climbing_rpm_does_not_use_mid_fallback(make_logic, out, clock):
     assert ups == []
 
 
+def test_race_slowly_rising_high_gear_does_not_fake_rpm_ceiling(make_logic, out, clock):
+    """STO regression: a slow 4th-gear pull must keep climbing toward WOT."""
+    tcu = make_logic("RACE", seed_ratios=False)
+    for i in range(120):
+        pct = 0.80 + i * 0.0008
+        td = make_telemetry(
+            gear=4,
+            current_rpm=pct * 8000.0,
+            engine_max_rpm=8000.0,
+            speed_ms=(150.0 + i * 0.10) / 3.6,
+            accel_raw=255,
+            brake_raw=0,
+        )
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td)
+
+    assert [s for s in out.shifts if s[0] == "UP"] == []
+
+
+def test_race_verified_low_nominal_limiter_upshifts_third(make_logic, out, clock):
+    """Shelby/low-end regression: a broad 84% sawtooth is a real limiter."""
+    tcu = make_logic("RACE", seed_ratios=False)
+    for i in range(55):
+        pct = 0.844 if i % 2 == 0 else 0.810
+        td = make_telemetry(
+            gear=3,
+            current_rpm=pct * 8000.0,
+            engine_max_rpm=8000.0,
+            speed_ms=120.0 / 3.6,
+            accel_raw=255,
+            brake_raw=0,
+        )
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td)
+
+    assert [kind for kind, _ in out.shifts if kind == "UP"] == ["UP"]
+
+
+def test_verified_low_limiter_blocks_power_downshift_back_to_redline(make_logic, out, clock):
+    """A valid limiter upshift must not be reversed into an over-limit gear."""
+    tcu = make_logic("RACE", seed_ratios=False)
+    td = make_telemetry(
+        gear=3,
+        current_rpm=0.55 * 8000.0,
+        engine_max_rpm=8000.0,
+        speed_ms=120.0 / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+    )
+    ratios = {1: 106.0, 2: 56.0, 3: 35.0}
+    tcu._calibrator.load(
+        td.car_key,
+        {"ratios": ratios, "counts": {gear: 50 for gear in ratios}},
+    )
+    tcu._rev_limiter._redline[td.car_key] = 0.844 * td.engine_max_rpm
+    tcu._rev_limiter._verified.add(td.car_key)
+
+    assert tcu._track_power_demand_downshift(td, clock.now) is False
+    assert [s for s in out.shifts if s[0].startswith("DOWN")] == []
+
+
 def test_race_stale_plateau_does_not_shift_on_next_pull(make_logic, out, clock):
     """A throttle lift must break plateau history before the next WOT pull."""
     tcu = make_logic("RACE", seed_ratios=False)
