@@ -1,7 +1,7 @@
 {
   "name": "virtual-tcu",
   "productName": "VirtualTCU",
-  "version": "13.2.6-pre.2",
+  "version": "13.2.6-pre.3",
   "private": true,
   "description": "External adaptive transmission controller for Forza Horizon 6 — Electron shell",
   "author": "Virtual TCU",

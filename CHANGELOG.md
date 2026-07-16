@@ -1,5 +1,19 @@
 # Changelog
 
+## [13.2.6-pre.3] - 2026-07-16
+
+> **Pre-release**
+>
+> Stabilizes the remaining Ford GT 2005, Pagani Huayra R 2021, and post-brake upshift edge cases without reverting the improved D/C-class timing.
+
+### Fixed
+
+- **Reachable upshift ceiling** — bound learned Race/Offroad targets by the configured or verified reachable fallback so a mature power-curve model cannot demand unreachable RPM.
+- **High-gear load plateau** — recover an upshift after at least one second of stable high-load, low-slip RPM and speed plateau; rising RPM, braking, throttle lift, slip, and gear changes reset the detector.
+- **Turbo compensation units** — normalize raw boost before comparing it with the internal turbo accumulator, preventing permanent sub-85% upshift blocking.
+- **Race wheelspin landing** — suppress traction-save upshifts that would land below `race_power_floor`, preventing `2→3→2` loops while preserving healthy and ratio-less traction shifts.
+- **Replay regressions** — cover Ford, Pagani, brake-stuck-in-second, launch, D/C-class, brake safety, and pending acknowledgement paths.
+
 ## [13.2.6-pre.1] - 2026-07-14
 
 > **Pre-release / 预发布测试版**
@@ -192,6 +206,20 @@
 ---
 
 # 更新日志
+
+## [13.2.6-pre.3] - 2026-07-16
+
+> **预发布测试版**
+>
+> 修复 Ford GT 2005、Pagani Huayra R 2021 与刹车后恢复升挡的剩余边缘问题，同时保留已经改善的 D/C 级车辆升挡表现。
+
+### 修复
+
+- **可达升挡上限** — 将 Race/Offroad 自学习目标限制在配置值或已验证的可达回退值以内，防止成熟动力曲线要求车辆无法达到的转速。
+- **高挡持续负载平台** — 高负载、低打滑且转速和车速稳定至少一秒后允许恢复升挡；转速上升、刹车、松油、打滑或换挡都会重置检测。
+- **涡轮补偿量纲** — 比较内部涡轮状态前先归一化原始增压值，避免 85% 转速以下被永久禁止升挡。
+- **Race 轮滑落挡保护** — 阻止落点低于 `race_power_floor` 的牵引力升挡，避免 `2→3→2` 循环，同时保留健康落点和未学习齿比时的保护。
+- **回放回归** — 覆盖 Ford、Pagani、刹车卡二挡、起步、D/C 级车辆、刹车安全与升挡确认路径。
 
 ## [13.2.6-pre.1] - 2026-07-14
 
