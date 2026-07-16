@@ -20,15 +20,15 @@ BRAKE = REPO_ROOT / "logs" / "刹车降档卡到2档.bin.gz"
 
 
 def _replay_commands(log_path: Path, monkeypatch, tmp_path) -> list[dict]:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(tcu_module.time, "time", lambda: clock["now"])
     out = FakeOutput()
     cfg = ConfigStore(path=str(tmp_path / f"{log_path.stem}-cfg.json"))
     prof = ProfileStore(path=str(tmp_path / f"{log_path.stem}-prof.json"))
     tcu = TCULogic(out, prof, cfg, TelemetryLogger())
     tcu.set_mode("RACE")
-    clock = {"now": 0.0}
     current = {"td": None}
     commands: list[dict] = []
-    monkeypatch.setattr(tcu_module.time, "time", lambda: clock["now"])
 
     def capture(from_gear: int, target_gear: int) -> None:
         td = current["td"]
@@ -57,23 +57,44 @@ def _replay_commands(log_path: Path, monkeypatch, tmp_path) -> list[dict]:
 @pytest.mark.skipif(not FORD.is_file(), reason="Ford replay not in logs/")
 def test_ford_recovers_fourth_to_fifth_before_braking(monkeypatch, tmp_path):
     commands = _replay_commands(FORD, monkeypatch, tmp_path)
-    recoveries = [c for c in commands if c["from"] == 4 and c["to"] == 5 and c["ms"] < 75_000]
-    assert recoveries, commands
+    recoveries = [
+        c
+        for c in commands
+        if c["from"] == 4
+        and c["to"] == 5
+        and 38_328 <= c["ms"] < 75_080
+        and c["state"] == "UPSHIFT"
+    ]
+    assert recoveries, (
+        "expected a normal 4->5 UPSHIFT after Ford re-entered 4th at 38,328 ms "
+        f"and before braking at 75,080 ms; commands={commands}"
+    )
 
 
 @pytest.mark.skipif(not PAGANI.is_file(), reason="Pagani replay not in logs/")
 def test_pagani_rejects_bad_skips_and_recovers_after_learning(monkeypatch, tmp_path):
     commands = _replay_commands(PAGANI, monkeypatch, tmp_path)
-    assert not [c for c in commands if c["from"] == 2 and c["to"] == 3 and c["ms"] < 7_000]
-    assert not [
+    early_skips = [c for c in commands if c["from"] == 2 and c["to"] == 3 and c["ms"] < 7_000]
+    unsafe_window = [
+        c for c in commands if c["from"] == 2 and c["to"] == 3 and 70_000 <= c["ms"] <= 72_000
+    ]
+    recoveries = [
         c
         for c in commands
         if c["from"] == 2
         and c["to"] == 3
-        and 70_000 <= c["ms"] <= 72_000
-        and c["state"] == "WHEELSPIN"
+        and 85_785 <= c["ms"] < 126_601
+        and c["state"] == "UPSHIFT"
     ]
-    assert [c for c in commands if c["to"] > c["from"] and c["ms"] >= 85_000]
+    assert not early_skips, f"unexpected launch 2->3 before 7,000 ms: {early_skips}"
+    assert not unsafe_window, (
+        f"unexpected 2->3 in the 70,000-72,000 ms unsafe window: {unsafe_window}; "
+        f"commands={commands}"
+    )
+    assert recoveries, (
+        "expected a normal 2->3 UPSHIFT after Pagani re-entered 2nd at 85,785 ms "
+        f"and before its downshift to 1st at 126,601 ms; commands={commands}"
+    )
 
 
 @pytest.mark.skipif(not BRAKE.is_file(), reason="brake replay not in logs/")
