@@ -23,6 +23,9 @@ STO_LOGS = [
 ]
 SHELBY = REPO_ROOT / "logs" / "tcu_replay_Shelby.bin.gz"
 HIGH_REDLINE_LOW_END = REPO_ROOT / "logs" / "tcu_replay_高红区低端车.bin.gz"
+NISSAN_20260716 = REPO_ROOT / "logs" / "tcu_replay_20260716_121805NissanBe1.bin.gz"
+FORD_20260716 = REPO_ROOT / "logs" / "tcu_replay_20260716_122510FordGT2005.bin.gz"
+HUAYRA_20260716 = REPO_ROOT / "logs" / "tcu_replay_20260716_123131Huayra.bin.gz"
 
 
 def _replay_commands(log_path: Path, monkeypatch, tmp_path) -> list[dict]:
@@ -38,6 +41,7 @@ def _replay_commands(log_path: Path, monkeypatch, tmp_path) -> list[dict]:
 
     def capture(from_gear: int, target_gear: int) -> None:
         td = current["td"]
+        projected = tcu._calibrator.project_rpm_after_shift(td, target_gear)
         commands.append(
             {
                 "ms": round(clock["now"] * 1000),
@@ -45,6 +49,12 @@ def _replay_commands(log_path: Path, monkeypatch, tmp_path) -> list[dict]:
                 "to": target_gear,
                 "state": tcu._tcu_state,
                 "rpm_pct": td.rpm_pct,
+                "driven_slip": tcu._driven_wheel_slip(td),
+                "landing_pct": (
+                    projected / td.engine_max_rpm
+                    if projected is not None and td.engine_max_rpm > 0
+                    else None
+                ),
             }
         )
 
@@ -159,3 +169,36 @@ def test_low_end_car_learns_low_nominal_limiter_and_keeps_upshifting(monkeypatch
         and 12_985 <= c["ms"] < 14_195
         and c["state"] == "RACE POWER DOWN"
     ]
+
+
+@pytest.mark.skipif(not NISSAN_20260716.is_file(), reason="20260716 Nissan replay missing")
+def test_20260716_nissan_reaches_each_upshift_before_recorded_ack(monkeypatch, tmp_path):
+    commands = _replay_commands(NISSAN_20260716, monkeypatch, tmp_path)
+
+    assert [c for c in commands if c["from"] == 1 and c["to"] == 2 and c["ms"] < 10_779]
+    assert [c for c in commands if c["from"] == 2 and c["to"] == 3 and c["ms"] < 34_512]
+
+
+@pytest.mark.skipif(not FORD_20260716.is_file(), reason="20260716 Ford replay missing")
+def test_20260716_ford_requests_fifth_before_top_speed(monkeypatch, tmp_path):
+    commands = _replay_commands(FORD_20260716, monkeypatch, tmp_path)
+
+    assert [
+        c
+        for c in commands
+        if c["from"] == 4 and c["to"] == 5 and c["state"] == "UPSHIFT" and c["ms"] < 50_000
+    ]
+
+
+@pytest.mark.skipif(not HUAYRA_20260716.is_file(), reason="20260716 Huayra replay missing")
+def test_20260716_huayra_rejects_spin_upshifts_with_bad_landings(monkeypatch, tmp_path):
+    commands = _replay_commands(HUAYRA_20260716, monkeypatch, tmp_path)
+    unsafe = [
+        c
+        for c in commands
+        if c["to"] == c["from"] + 1
+        and c["driven_slip"] > 1.2
+        and (c["landing_pct"] is None or c["landing_pct"] < 0.60)
+    ]
+
+    assert not unsafe, f"wheelspin upshifts would land below the Race power band: {unsafe}"

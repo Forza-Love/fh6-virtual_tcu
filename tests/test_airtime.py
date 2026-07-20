@@ -81,6 +81,21 @@ def test_single_freefall_frame_does_not_engage():
     assert not det.is_airborne
 
 
+def test_short_crest_exposes_unweighted_hold_without_airborne_state():
+    det = AirtimeDetector()
+    crest = make_telemetry(speed_ms=180 / 3.6, accel_y=-3.5)
+    det.update(crest, 0.016)
+
+    assert det.is_unweighted
+    assert not det.is_airborne
+
+    settled = make_telemetry(speed_ms=180 / 3.6, accel_y=0.0)
+    det.update(settled, 0.20)
+    assert det.is_unweighted
+    det.update(settled, 0.30)
+    assert not det.is_unweighted
+
+
 def test_hysteresis_band_does_not_flap():
     """accel_y sitting in the -6..-4 band (neither falling nor grounded)
     must not toggle the state once airborne."""

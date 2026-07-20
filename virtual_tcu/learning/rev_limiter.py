@@ -20,6 +20,9 @@ class RevLimiterDetector:
     POST_UPSHIFT_IGNORE_S = 0.8
     WINDOW = 24
     STABLE_FRAMES = 18
+    # A live sawtooth candidate may guide an upshift before it has accumulated
+    # enough evidence to become a persisted/over-rev safety limit.
+    CANDIDATE_STABLE_FRAMES = 4
     # Some Forza cars report a nominal max RPM far above the reachable fuel
     # cut. The supplied logs include real limiters at 84–93% of nominal.
     MIN_PEAK_PCT = 0.78
@@ -41,10 +44,12 @@ class RevLimiterDetector:
         self._peak_hold: dict[tuple, tuple] = {}
         self._active_gear: dict[tuple, int] = {}
         self._verified: set[tuple] = set()
+        self._candidate: dict[tuple, float] = {}
 
     def _reset(self, car: tuple):
         self._rpm_window.pop(car, None)
         self._peak_hold.pop(car, None)
+        self._candidate.pop(car, None)
 
     def observe(
         self,
@@ -87,6 +92,7 @@ class RevLimiterDetector:
         # (the sawtooth) — a flat WOT hill-crawl is rejected here.
         if wmax < td.engine_max_rpm * self.MIN_PEAK_PCT or (wmax - wmin) < self.MIN_OSCILLATION:
             self._peak_hold.pop(car, None)
+            self._candidate.pop(car, None)
             return
         recent = list(win)
         deltas = [new - old for old, new in zip(recent, recent[1:], strict=False)]
@@ -96,6 +102,7 @@ class RevLimiterDetector:
             # One impact, shift transient, or telemetry dip is not the
             # repeated sawtooth signature of fuel cut.
             self._peak_hold.pop(car, None)
+            self._candidate.pop(car, None)
             return
 
         anchor_peak, held_frames = self._peak_hold.get(car, (wmax, 0))
@@ -103,7 +110,11 @@ class RevLimiterDetector:
             held_frames += 1
         else:
             anchor_peak, held_frames = wmax, 0  # peak moved → still climbing
+            self._candidate.pop(car, None)
         self._peak_hold[car] = (anchor_peak, held_frames)
+
+        if held_frames >= self.CANDIDATE_STABLE_FRAMES:
+            self._candidate[car] = max(anchor_peak, wmax)
 
         if held_frames >= self.STABLE_FRAMES:
             confirmed_peak = max(anchor_peak, wmax)
@@ -121,6 +132,10 @@ class RevLimiterDetector:
 
     def effective_redline(self, td: Telemetry) -> float | None:
         return self._redline.get(td.car_key)
+
+    def candidate_redline(self, td: Telemetry) -> float | None:
+        """Return a current-gear limiter candidate that is not yet persisted."""
+        return self._candidate.get(td.car_key)
 
     def is_verified(self, car: tuple) -> bool:
         return car in self._verified

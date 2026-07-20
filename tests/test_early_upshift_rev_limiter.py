@@ -5,6 +5,7 @@ redline and overwrote ``engine_max_rpm``, every gear after 1st shifted ~15–20%
 below the real redline (e.g. ~5600 on a 7000 RPM car in Race).
 """
 
+import pytest
 import virtual_tcu.logic.tcu as tcu_module
 from tests.conftest import CAR_KEY, Clock, FakeOutput, make_telemetry
 from virtual_tcu.config.store import ConfigStore
@@ -143,6 +144,50 @@ def test_rev_limiter_does_not_confirm_gradually_rising_peak():
         det.observe(td, last_downshift_time=0.0, now=now + i * 0.016)
 
     assert det.effective_redline(td) is None
+    assert det.candidate_redline(td) is None
+
+
+def test_rev_limiter_exposes_live_candidate_before_safety_commit():
+    det = RevLimiterDetector()
+    nominal = 12000.0
+    now = 1000.0
+
+    for i in range(RevLimiterDetector.WINDOW + 3):
+        pct = 0.895 if i % 2 == 0 else 0.875
+        td = make_telemetry(
+            gear=4,
+            current_rpm=nominal * pct,
+            engine_max_rpm=nominal,
+            accel_raw=255,
+        )
+        det.observe(td, last_downshift_time=0.0, now=now + i * 0.016)
+
+    assert det.candidate_redline(td) == pytest.approx(nominal * 0.895)
+    assert det.effective_redline(td) is None
+    assert det.is_verified(td.car_key) is False
+
+
+def test_live_limiter_candidate_advances_high_gear_upshift(make_logic, out, clock):
+    tcu = make_logic("RACE", seed_ratios=False)
+
+    # TCULogic clears the first observation while activating a new car key.
+    for i in range(RevLimiterDetector.WINDOW + 5):
+        pct = 0.895 if i % 2 == 0 else 0.875
+        td = make_telemetry(
+            gear=4,
+            current_rpm=12000.0 * pct,
+            engine_max_rpm=12000.0,
+            speed_ms=220 / 3.6,
+            accel_raw=255,
+        )
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td)
+        if out.shifts:
+            break
+
+    assert [kind for kind, _ in out.shifts] == ["UP"]
+    assert tcu._rev_limiter.effective_redline(td) is None
 
 
 def test_rev_limiter_learns_verified_low_nominal_sawtooth():

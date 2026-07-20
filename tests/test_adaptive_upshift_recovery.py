@@ -239,3 +239,44 @@ def test_race_wheelspin_preserves_ratio_less_fallback(make_logic, out, clock):
     tcu = make_logic("RACE", seed_ratios=False)
     feed(tcu, out, clock, _wheelspin_frame(speed_kmh=80.0), 6)
     assert [kind for kind, _ in out.shifts if kind == "UP"] == ["UP"]
+
+
+def test_race_in_band_upshift_holds_bad_landing_during_wheelspin(make_logic, out, clock):
+    tcu = make_logic("RACE")
+    td = _wheelspin_frame(speed_kmh=80.0)
+    td.current_rpm = 0.95 * td.engine_max_rpm
+    tcu._tune_id_by_base[td.car_key_base] = CAR_KEY[3]
+
+    feed(tcu, out, clock, td, 6)
+
+    assert [kind for kind, _ in out.shifts if kind == "UP"] == []
+    assert tcu._tcu_state == "WHEELSPIN HOLD"
+
+
+def test_race_wheelspin_third_requires_minimum_rpm(make_logic, out, clock):
+    tcu = make_logic("RACE", seed_ratios=False)
+    td = _wheelspin_frame(speed_kmh=100.0)
+    td.gear = 3
+    td.current_rpm = 0.60 * td.engine_max_rpm
+
+    feed(tcu, out, clock, td, 6)
+
+    assert [kind for kind, _ in out.shifts if kind == "UP"] == []
+
+
+def test_race_power_downshift_holds_while_wheels_are_spinning(make_logic, out, clock):
+    tcu = make_logic("RACE")
+    td = make_telemetry(
+        gear=4,
+        current_rpm=0.50 * 8000,
+        engine_max_rpm=8000,
+        speed_ms=100 / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+        drivetrain=1,
+        slip_rl=-1.4,
+        slip_rr=-1.6,
+    )
+
+    assert tcu._track_power_demand_downshift(td, clock.now) is False
+    assert [kind for kind, _ in out.shifts if kind.startswith("DOWN")] == []

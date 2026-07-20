@@ -208,3 +208,21 @@ def test_grounded_mismatch_downshifts(make_logic, out, clock):
     tcu.process(md)
     assert "DOWN" in _kinds(out)
     assert Cfg.MIN_SPEED_KMH < 30  # sanity: not the standstill path
+
+
+def test_unweighted_crest_holds_power_downshift(make_logic, out, clock):
+    tcu = make_logic("RACE")
+    crest = make_telemetry(
+        speed_ms=180 / 3.6,
+        accel_y=-3.5,
+        current_rpm=0.50 * 8000,
+        accel_raw=255,
+        gear=7,
+    )
+
+    clock.now += 0.016
+    out.now = clock.now
+    tcu.process(crest)
+
+    assert out.shifts == []
+    assert tcu._tcu_state == "UNWEIGHTED"

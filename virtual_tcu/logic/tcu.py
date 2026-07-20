@@ -183,6 +183,7 @@ class TCULogic:
         self._rev_limiter._rpm_window.pop(ck, None)
         self._rev_limiter._peak_hold.pop(ck, None)
         self._rev_limiter._active_gear.pop(ck, None)
+        self._rev_limiter._candidate.pop(ck, None)
         self._rev_limiter._verified.discard(ck)
         self._profile_baseline_gear1.pop(ck, None)
         self._upshift_cap_by_key.pop(ck, None)
@@ -725,12 +726,13 @@ class TCULogic:
                 self._tcu_state_sub = "stabilizing"
                 return
 
-        # Global airborne hold: while the wheels are off the ground, wheel-
-        # derived speed/RPM are meaningless, so freeze every automatic shift —
-        # including the pre-dispatch GEAR MISMATCH / STANDSTILL paths that the
-        # per-mode transient block never reached.
-        if self._config.get("feat_airtime_lock") and self._airtime.is_airborne:
-            self._tcu_state = "AIRBORNE"
+        # Global low-load hold: while airborne or cresting a hill with the
+        # suspension unloaded, wheel-derived speed/RPM are unreliable. Freeze
+        # every automatic shift, including the pre-dispatch mismatch paths.
+        if self._config.get("feat_airtime_lock") and (
+            self._airtime.is_airborne or self._airtime.is_unweighted
+        ):
+            self._tcu_state = "AIRBORNE" if self._airtime.is_airborne else "UNWEIGHTED"
             self._tcu_state_sub = "holding decisions"
             return
 
@@ -806,6 +808,11 @@ class TCULogic:
             return False
         if td.gear <= 2:
             lock_ms = max(lock_ms, Cfg.LOW_GEAR_LOCK_MS)
+        if self._driven_wheel_slip(td) > 1.2:
+            # A ratio-less traction upshift may be the only way out of spin.
+            # Give the tyres time to reconnect before a power-demand path can
+            # immediately undo it.
+            downshift_lock_s = max(downshift_lock_s, 1.2)
 
         self._tcu_state = state
         self._tcu_state_sub = sub
@@ -1029,10 +1036,7 @@ class TCULogic:
         if td.throttle < 0.40:
             self._slip_streak = 0
             return False
-        if td.gear <= 2 and td.rpm_pct < 0.72:
-            self._slip_streak = 0
-            return False
-        if td.gear == 1 and td.speed_kmh < 22.0:
+        if td.rpm_pct < 0.72:
             self._slip_streak = 0
             return False
 
@@ -1146,10 +1150,10 @@ class TCULogic:
     @staticmethod
     def _driven_wheel_slip(td: Telemetry) -> float:
         if td.drivetrain == 0:
-            return max(td.slip_fl, td.slip_fr)
+            return max(abs(td.slip_fl), abs(td.slip_fr))
         if td.drivetrain == 1:
-            return max(td.slip_rl, td.slip_rr)
-        return max(td.slip_fl, td.slip_fr, td.slip_rl, td.slip_rr)
+            return max(abs(td.slip_rl), abs(td.slip_rr))
+        return max(abs(td.slip_fl), abs(td.slip_fr), abs(td.slip_rl), abs(td.slip_rr))
 
     def _reset_load_plateau(self) -> None:
         self._load_plateau_key = None
@@ -1221,6 +1225,12 @@ class TCULogic:
         learned_pct = self._trusted_rev_limiter_pct(td)
         if learned_pct is not None and learned_pct < wot_pct - 0.005:
             return learned_pct
+
+        candidate = self._rev_limiter.candidate_redline(td)
+        if candidate is not None and td.engine_max_rpm > 0:
+            candidate_pct = candidate / td.engine_max_rpm
+            if self._rev_limiter.MIN_COMMIT_NOMINAL_FRAC <= candidate_pct < wot_pct - 0.005:
+                return candidate_pct
 
         # The short-window fallback is intentionally limited to 1st/2nd.
         # In higher gears, ordinary acceleration slows enough to look flat for
@@ -1317,6 +1327,7 @@ class TCULogic:
         min_throttle: float = 0.05,
         *,
         downshift_lock_s: float = 1.0,
+        traction_floor: float | None = None,
     ) -> bool:
         if td.throttle < min_throttle:
             return False
@@ -1328,6 +1339,14 @@ class TCULogic:
             return False
         if td.speed_kmh <= Cfg.MIN_SPEED_KMH:
             return False
+        if (
+            traction_floor is not None
+            and self._driven_wheel_slip(td) > 1.2
+            and not self._race_wheelspin_landing_allowed(td, traction_floor)
+        ):
+            self._tcu_state = "WHEELSPIN HOLD"
+            self._tcu_state_sub = "next gear below power band"
+            return True
 
         target_pct = self._effective_upshift_pct(td, offset)
         if td.rpm_pct < target_pct:
@@ -1475,8 +1494,11 @@ class TCULogic:
         return False
 
     def _blocked_by_transient(self) -> str | None:
-        if self._config.get("feat_airtime_lock") and self._airtime.is_airborne:
-            return "AIRBORNE"
+        if self._config.get("feat_airtime_lock"):
+            if self._airtime.is_airborne:
+                return "AIRBORNE"
+            if self._airtime.is_unweighted:
+                return "UNWEIGHTED"
         if self._config.get("feat_transient_lock") and self._yaw_transient.is_blocking:
             return "CORRECTING"
         return None
@@ -1563,6 +1585,10 @@ class TCULogic:
         and not climbing-only. Returns to the power band on corner exit or a
         sudden floor-it from a tall cruising gear, without waiting for a hill."""
         if td.gear <= 2 or td.brake >= 0.08 or td.speed_kmh <= 25.0:
+            return False
+        if self._driven_wheel_slip(td) > 0.8:
+            # More wheel torque cannot cure wheelspin. Hold the current gear
+            # until grip returns instead of starting another hunt cycle.
             return False
 
         thr_gate = min_throttle
@@ -1835,7 +1861,13 @@ class TCULogic:
 
         cruise_quiet = self._config.get("feat_drive_style") and self._drive_style.regime == "CRUISE"
         up_offset = 0.0 if cruise_quiet else 0.03
-        if self._track_upshift_in_band(td, now, offset=up_offset, downshift_lock_s=0.5):
+        if self._track_upshift_in_band(
+            td,
+            now,
+            offset=up_offset,
+            downshift_lock_s=0.5,
+            traction_floor=power_floor,
+        ):
             return
 
         self._tcu_state = "RACE"
