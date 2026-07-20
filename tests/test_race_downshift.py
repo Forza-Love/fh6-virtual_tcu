@@ -9,7 +9,7 @@ Covers the P0 changes:
   the per-mode transient block never reached
 """
 
-from tests.conftest import make_telemetry
+from tests.conftest import CAR_KEY, make_telemetry
 from virtual_tcu.config.constants import Cfg
 
 
@@ -50,6 +50,102 @@ def test_shift_down_blocks_overrev(make_logic, out, clock):
     assert tcu._shift_down(td, 300, "TEST") is False
     assert out.shifts == []
     assert tcu._tcu_state == "OVER-REV BLOCKED"
+
+
+def _load_short_gearing(tcu):
+    ratios = {1: 100.0, 2: 69.0, 3: 47.0, 4: 36.0, 5: 29.0, 6: 24.0}
+    tcu._calibrator.load(CAR_KEY, {"ratios": ratios, "counts": {g: 50 for g in ratios}})
+
+
+def test_skip_down_validates_exact_target_gear(make_logic, out):
+    """A 6→2 command must validate 2nd, not the unrelated 4th gear."""
+    tcu = make_logic("RACE")
+    _load_short_gearing(tcu)
+    td = make_telemetry(
+        speed_ms=120 / 3.6,
+        current_rpm=24 * 120,
+        brake_raw=255,
+        gear=6,
+    )
+
+    # 2nd would land at 8280 RPM, beyond the 8160 hard over-rev limit.
+    assert tcu._shift_down_double(td, 250, target=2) is False
+    assert out.shifts == []
+
+
+def test_brake_target_is_safe_at_current_speed(make_logic, out, clock):
+    """Future-speed selection must not execute an unsafe target immediately."""
+    tcu = make_logic("RACE")
+    _load_short_gearing(tcu)
+    commands = []
+    out.shift_to = lambda from_gear, target_gear: commands.append((from_gear, target_gear))
+    td = make_telemetry(
+        speed_ms=120 / 3.6,
+        current_rpm=24 * 120,
+        brake_raw=255,
+        gear=6,
+    )
+
+    assert tcu._track_brake_down(td, clock.now, brake_thr=0.21) is True
+    # At the projected 96 km/h the desired gear is 2nd, but at the current
+    # 120 km/h it would land at 103.5% of redline. 3rd lands safely at 70.5%.
+    assert commands == [(6, 3)]
+
+
+def test_brake_target_keeps_safe_direct_downshift(make_logic, out, clock):
+    """The safety clamp must not make already-safe brake shifts less responsive."""
+    tcu = make_logic("RACE")
+    _load_short_gearing(tcu)
+    commands = []
+    out.shift_to = lambda from_gear, target_gear: commands.append((from_gear, target_gear))
+    td = make_telemetry(
+        speed_ms=110 / 3.6,
+        current_rpm=24 * 110,
+        brake_raw=255,
+        gear=6,
+    )
+
+    assert tcu._track_brake_down(td, clock.now, brake_thr=0.21) is True
+    assert commands == [(6, 2)]
+
+
+def test_panic_brake_cannot_bypass_current_speed_safety(make_logic, out, clock):
+    """Low current RPM must not bypass the 98% brake landing limit."""
+    tcu = make_logic("RACE", seed_ratios=False)
+    ratios = {1: 100.0, 2: 69.0, 3: 30.0}
+    tcu._calibrator.load(CAR_KEY, {"ratios": ratios, "counts": {g: 50 for g in ratios}})
+    commands = []
+    out.shift_to = lambda from_gear, target_gear: commands.append((from_gear, target_gear))
+    td = make_telemetry(
+        speed_ms=115 / 3.6,
+        current_rpm=30 * 115,
+        brake_raw=255,
+        gear=3,
+    )
+
+    # 2nd would land at 7935 RPM (99.2%): below the 102% hard blocker but
+    # above the 98% brake-down ceiling. Heavy braking must not bypass it.
+    assert tcu._track_brake_down(td, clock.now, brake_thr=0.21) is False
+    assert commands == []
+
+
+def test_power_down_missing_skip_ratio_falls_back_to_single(make_logic, out, clock):
+    """A missing exact skip target ratio must degrade to one safe downshift."""
+    tcu = make_logic("RACE", seed_ratios=False)
+    ratios = {1: 120.0, 2: 80.0, 3: 58.0, 5: 35.0, 6: 29.0}
+    tcu._calibrator.load(CAR_KEY, {"ratios": ratios, "counts": {g: 50 for g in ratios}})
+    commands = []
+    out.shift_to = lambda from_gear, target_gear: commands.append((from_gear, target_gear))
+    td = make_telemetry(
+        speed_ms=100 / 3.6,
+        current_rpm=29 * 100,
+        accel_raw=255,
+        brake_raw=0,
+        gear=6,
+    )
+
+    assert tcu._track_power_demand_downshift(td, clock.now) is True
+    assert commands == [(6, 5)]
 
 
 def _feed_decel(tcu, out, clock, *, gear, brake, throttle, start_kmh, ratio, frames=16, step=1.2):
@@ -112,3 +208,21 @@ def test_grounded_mismatch_downshifts(make_logic, out, clock):
     tcu.process(md)
     assert "DOWN" in _kinds(out)
     assert Cfg.MIN_SPEED_KMH < 30  # sanity: not the standstill path
+
+
+def test_unweighted_crest_holds_power_downshift(make_logic, out, clock):
+    tcu = make_logic("RACE")
+    crest = make_telemetry(
+        speed_ms=180 / 3.6,
+        accel_y=-3.5,
+        current_rpm=0.50 * 8000,
+        accel_raw=255,
+        gear=7,
+    )
+
+    clock.now += 0.016
+    out.now = clock.now
+    tcu.process(crest)
+
+    assert out.shifts == []
+    assert tcu._tcu_state == "UNWEIGHTED"

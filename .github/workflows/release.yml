@@ -77,3 +77,4 @@ jobs:
             apps/electron/release/latest.yml
             VirtualTCU-Backend-*-win64.zip
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

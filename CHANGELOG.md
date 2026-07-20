@@ -1,5 +1,59 @@
 # Changelog
 
+## [13.2.6] - 2026-07-20
+
+### Fixed
+
+- **Race launch and wheelspin stability** — hold low-gear upshifts whose learned landing RPM would fall below the power band, require meaningful RPM before a third-gear traction upshift, and suppress power-demand downshifts until driven-wheel grip returns. This prevents high-power cars such as the Pagani Huayra from entering `2→3→2` launch loops.
+- **Faster real-limiter recovery** — use a stable live fuel-cut candidate for shift timing before the stricter persisted safety limit is fully confirmed, reducing time spent beyond the usable redline without weakening over-rev protection.
+- **Low and unreachable redlines** — recognize verified fuel-cut patterns down to 78% of Forza's nominal maximum RPM, keep learned shift targets within configured or reachable ceilings, and recover low-gear/high-load plateaus that cannot reach the normal WOT target.
+- **High-gear load plateaus** — recover upshifts at sustained speed/load walls while rejecting ordinary slow RPM growth, braking, wheelspin, throttle lifts, and transient chassis events.
+- **Hill-crest shift hold** — detect brief suspension unloading before full airborne detection and freeze automatic shifts through the crest, preventing floaty high-speed moments from causing an unsafe high-RPM downshift.
+- **Shift safety and acknowledgement** — preserve pending upshifts through Forza's mid-shift gear encoding, retry rejected low-gear commands safely, normalize turbo demand, and keep brake/power downshifts within learned over-rev limits.
+- **Replay regression coverage** — add recorded and synthetic coverage for Nissan Be-1, Ford GT 2005, Pagani Huayra, Shelby Daytona, Lamborghini Huracán STO, low-redline vehicles, hill crests, braking, and low-gear hunting.
+
+## [13.2.6-pre.4] - 2026-07-16
+
+> **Pre-release**
+>
+> Corrects RPM-ceiling detection across the Lamborghini Huracán STO, Shelby Daytona, and cars whose reachable fuel cut is far below Forza's nominal maximum RPM.
+
+### Fixed
+
+- **STO high-gear early upshifts** — restrict the short-window RPM-ceiling fallback to gears 1–2 so normal slow RPM growth in gears 4–7 is no longer mistaken for an unreachable redline.
+- **Low nominal fuel-cut learning** — accept verified repeated limiter sawtooth patterns from 78% of nominal RPM upward, while rejecting one-off RPM drops, gear-transition carryover, wheelspin, and gradually moving peaks.
+- **Shelby third-gear recovery** — recognize the Daytona's approximately 89% real limiter and restore automatic `3→4` upshifts.
+- **Low-end long-red-zone vehicles** — learn approximately 84% reachable limiters, restore continuous `1→2→3` upshifts, and use the verified ceiling for over-rev protection so a valid upshift is not reversed immediately.
+- **Profile compatibility** — persist newly verified limiter values with a version marker; older low limiter values remain untrusted until confirmed live, preventing stale false learning from returning.
+- **Replay regressions** — add coverage for both STO logs, Shelby, and the high-red-zone low-end vehicle alongside the existing Ford, Pagani, brake, and low-gear suites.
+
+## [13.2.6-pre.3] - 2026-07-16
+
+> **Pre-release**
+>
+> Stabilizes the remaining Ford GT 2005, Pagani Huayra R 2021, and post-brake upshift edge cases without reverting the improved D/C-class timing.
+
+### Fixed
+
+- **Reachable upshift ceiling** — bound learned Race/Offroad targets by the configured or verified reachable fallback so a mature power-curve model cannot demand unreachable RPM.
+- **High-gear load plateau** — recover an upshift after at least one second of stable high-load, low-slip RPM and speed plateau; rising RPM, braking, throttle lift, slip, and gear changes reset the detector.
+- **Turbo compensation units** — normalize raw boost before comparing it with the internal turbo accumulator, preventing permanent sub-85% upshift blocking.
+- **Race wheelspin landing** — suppress traction-save upshifts that would land below `race_power_floor`, preventing `2→3→2` loops while preserving healthy and ratio-less traction shifts.
+- **Replay regressions** — cover Ford, Pagani, brake-stuck-in-second, launch, D/C-class, brake safety, and pending acknowledgement paths.
+
+## [13.2.6-pre.1] - 2026-07-14
+
+> **Pre-release / 预发布测试版**
+>
+> Refines v13.2.5 upshift logic after user replay `跳一档.gz`: no more fixed 80% threshold on gears 1–2; uses RPM-ceiling detection instead.
+>
+> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。
+
+### Fixed
+
+- **v13.2.5 regressions (user replay `跳一档.gz`)** — replace blanket `race_up_mid` fallback on gears 1–2 with `_rpm_ceiling_reached()` (tight plateau + low-gear speed wall); shift at measured ceiling (`peak - 1%`) instead of a flat 80%. Fixes launch wheelspin upshift at ~66% RPM (1st gear wheelspin disabled; 2nd/3rd only, RPM ≥ 72%) and restores post-brake upshifts when RPM plateaus below `race_up_wot`.
+- **pytest** — extend `test_low_gear_rpm_ceiling.py` with `跳一档.gz` replay regressions.
+
 ## [13.2.5] - 2026-07-14
 
 
@@ -179,6 +233,58 @@
 ---
 
 # 更新日志
+
+## [13.2.6] - 2026-07-20
+
+### 修复
+
+- **Race 起步与轮滑稳定性** — 当已学习的下一挡落点低于动力区间时保持当前低挡，三挡牵引力升挡前要求足够转速，并在驱动轮恢复抓地前禁止动力降挡，避免 Pagani Huayra 等高性能车辆陷入 `2→3→2` 起步循环。
+- **更快识别实际断油点** — 稳定的实时断油候选可在严格的持久化安全红线完全确认前用于升挡时机，减少发动机停留在有效红线之外的时间，同时不降低防超转保护。
+- **低红线与不可达红线** — 支持确认低至 Forza 名义最高转速 78% 的真实断油特征，将学习目标限制在配置值或已验证可达上限内，并恢复无法达到常规 WOT 目标的低挡及高负载平台升挡。
+- **高挡持续负载平台** — 在持续极速/负载墙下恢复升挡，同时排除正常缓慢爬升、刹车、轮滑、松油和车身瞬态造成的误判。
+- **坡顶换挡保持** — 在完全离地检测触发前识别短暂悬挂卸载并冻结自动换挡，避免高速发飘时错误降入高转低挡。
+- **换挡安全与确认** — 在 Forza 换挡中间挡位编码期间保留待确认升挡，安全重试被拒绝的低挡指令，统一涡轮需求量纲，并保证刹车/动力降挡不超过学习到的安全转速。
+- **回放回归覆盖** — 新增 Nissan Be-1、Ford GT 2005、Pagani Huayra、Shelby Daytona、Lamborghini Huracán STO、低红线车辆、坡顶、刹车和低挡 hunting 的录制与合成测试。
+
+## [13.2.6-pre.4] - 2026-07-16
+
+> **预发布测试版**
+>
+> 修正 Lamborghini Huracán STO、Shelby Daytona，以及实际断油转速明显低于 Forza 名义最高转速车辆的红线识别。
+
+### 修复
+
+- **STO 高挡过早升挡** — 将短窗口转速触顶回退限制在 1–2 挡，4–7 挡正常但较慢的转速上升不再被误判为无法达到的红线。
+- **低于名义转速的断油识别** — 支持识别名义转速 78% 以上、重复出现的断油锯齿；同时排除单次转速跌落、跨挡残留、轮胎打滑与持续移动的峰值。
+- **Shelby 三挡恢复** — 识别 Daytona 约 89% 的实际断油红线，恢复自动 `3→4` 升挡。
+- **长红区低端车辆** — 学习约 84% 的可达红线，恢复连续 `1→2→3` 升挡，并将已验证红线用于降挡防超转，避免正确升挡后立即被软件降回。
+- **配置兼容** — 新确认的实际红线使用带版本标记的格式持久化；旧版较低红线在实时重新确认前不会被信任，防止历史误学习重新生效。
+- **回放回归** — 新增两份 STO、Shelby 与高红区低端车回放测试，并保留 Ford、Pagani、刹车与低挡测试覆盖。
+
+## [13.2.6-pre.3] - 2026-07-16
+
+> **预发布测试版**
+>
+> 修复 Ford GT 2005、Pagani Huayra R 2021 与刹车后恢复升挡的剩余边缘问题，同时保留已经改善的 D/C 级车辆升挡表现。
+
+### 修复
+
+- **可达升挡上限** — 将 Race/Offroad 自学习目标限制在配置值或已验证的可达回退值以内，防止成熟动力曲线要求车辆无法达到的转速。
+- **高挡持续负载平台** — 高负载、低打滑且转速和车速稳定至少一秒后允许恢复升挡；转速上升、刹车、松油、打滑或换挡都会重置检测。
+- **涡轮补偿量纲** — 比较内部涡轮状态前先归一化原始增压值，避免 85% 转速以下被永久禁止升挡。
+- **Race 轮滑落挡保护** — 阻止落点低于 `race_power_floor` 的牵引力升挡，避免 `2→3→2` 循环，同时保留健康落点和未学习齿比时的保护。
+- **回放回归** — 覆盖 Ford、Pagani、刹车卡二挡、起步、D/C 级车辆、刹车安全与升挡确认路径。
+
+## [13.2.6-pre.1] - 2026-07-14
+
+> **预发布测试版**
+>
+> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。
+
+### 修复
+
+- **v13.2.5 回归（用户 replay `跳一档.gz`）** — 用 `_rpm_ceiling_reached()`（紧 plateau + 低档速度墙）替代 1–2 档固定 `race_up_mid` 回退；在实测天花板（`peak - 1%`）升档，不再一律 80%。禁用 1 档打滑升档（仅 2–3 档、RPM ≥ 72%），修复起步 ~66% 过早升档；刹车后再加速时 RPM 触顶可恢复升档。
+- **pytest** — `test_low_gear_rpm_ceiling.py` 增加 `跳一档.gz` 回放回归。
 
 ## [13.2.5] - 2026-07-14
 

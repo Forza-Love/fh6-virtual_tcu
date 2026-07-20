@@ -3219,7 +3219,7 @@ wheels = [
 
 [[package]]
 name = "virtual-tcu"
-version = "13.2.4"
+version = "13.2.6"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },

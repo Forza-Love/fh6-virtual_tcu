@@ -7,11 +7,19 @@ time is replaced by a controllable clock so shift cooldowns/locks are
 deterministic.
 """
 
+# ruff: noqa: E402 -- keyboard must be mocked before importing TCULogic.
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+# Importing the real ``keyboard`` package can touch platform input services at
+# collection time. Tests only need its listener surface, so install the mock
+# before importing TCULogic (which imports ``keyboard`` at module scope).
+sys.modules.setdefault("keyboard", MagicMock())
+
 import virtual_tcu.logic.tcu as tcu_module
 from virtual_tcu.config.store import ConfigStore
 from virtual_tcu.input.interface import OutputInterface
@@ -19,9 +27,6 @@ from virtual_tcu.logic.tcu import TCULogic
 from virtual_tcu.storage.profiles import ProfileStore
 from virtual_tcu.telemetry.logger import TelemetryLogger
 from virtual_tcu.telemetry.model import Telemetry
-
-sys.modules.setdefault("keyboard", MagicMock())
-
 
 CAR_KEY_BASE = (100, 5, 800)
 

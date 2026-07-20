@@ -32,19 +32,30 @@ class AirtimeDetector:
 
     FREEFALL_G = -6.0  # accel_y below this = free-fall (enter airborne)
     GROUND_G = -4.0  # accel_y above this = back on the ground (exit)
+    # A crest can unload the suspension without producing three full
+    # free-fall frames. Wheel-speed/RPM based shift decisions are already
+    # unreliable there, so expose a short pre-air hold as well.
+    UNWEIGHTED_G = -3.0
     MIN_SPEED_FOR_AIRBORNE = 15.0
     FRAMES_TO_ENGAGE = 3
     FRAMES_TO_DISENGAGE = 2
     LANDING_WINDOW_S = 0.75
+    UNWEIGHTED_HOLD_S = 0.25
 
     def __init__(self):
         self._air_streak = 0
         self._ground_streak = 0
         self._is_airborne = False
         self._landing_until = 0.0
+        self._unweighted_until = 0.0
+        self._is_unweighted = False
 
     def update(self, td: Telemetry, now: float) -> AirState:
         falling = td.accel_y < self.FREEFALL_G and td.speed_kmh > self.MIN_SPEED_FOR_AIRBORNE
+        unweighted = td.accel_y < self.UNWEIGHTED_G and td.speed_kmh > self.MIN_SPEED_FOR_AIRBORNE
+        if unweighted:
+            self._unweighted_until = now + self.UNWEIGHTED_HOLD_S
+        self._is_unweighted = unweighted or now < self._unweighted_until
         # Hysteresis band (-6 .. -4): neither vote advances, so a value hovering
         # near the threshold can't flap the state.
         grounded = td.accel_y > self.GROUND_G
@@ -77,6 +88,11 @@ class AirtimeDetector:
     @property
     def is_airborne(self) -> bool:
         return self._is_airborne
+
+    @property
+    def is_unweighted(self) -> bool:
+        """Whether suspension load is too low for a reliable shift decision."""
+        return self._is_unweighted
 
     @property
     def landing_until(self) -> float:

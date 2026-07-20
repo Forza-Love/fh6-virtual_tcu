@@ -18,6 +18,8 @@ def restart_argv() -> list[str]:
     extra = sys.argv[1:]
     if getattr(sys, "frozen", False):
         return [sys.executable, *extra]
+    if extra[:2] == ["-m", "virtual_tcu"]:
+        return [sys.executable, *extra]
     return [sys.executable, "-m", "virtual_tcu", *extra]
 
 

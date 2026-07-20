@@ -110,3 +110,28 @@ def test_band_down_blocked_near_upshift_threshold(make_logic, out, clock):
         tcu.process(td_legit)
 
     assert _downs(out), "expected at least one legitimate BAND DOWN downshift"
+
+
+def test_offroad_torque_down_uses_offroad_upshift_threshold(make_logic, out, clock):
+    """Production Offroad dispatch must not downshift into its upshift band."""
+    tcu = make_logic("OFFROAD", seed_ratios=False)
+    tcu._calibrator.load(CAR_KEY, {"ratios": _RATIOS, "counts": {g: 80 for g in _RATIOS}})
+
+    # Gear 3 would land at 83.2%. That is inside Offroad's 8% guard band
+    # (90%-8%=82%), but outside a wrongly hard-coded Race band (94%-8%=86%).
+    td = make_telemetry(
+        gear=4,
+        current_rpm=int(0.40 * _MAX_RPM),
+        engine_max_rpm=_MAX_RPM,
+        speed_ms=116.0 / 3.6,
+        accel_raw=int(0.65 * 255),
+        brake_raw=0,
+        profile_tune_id=CAR_KEY[-1],
+    )
+    tcu._tune_id_by_base[td.car_key_base] = CAR_KEY[-1]
+
+    assert tcu._downshift_would_hunt(td, 3) is True
+    clock.now += 0.016
+    out.now = clock.now
+    tcu.process(td)
+    assert _downs(out) == []
