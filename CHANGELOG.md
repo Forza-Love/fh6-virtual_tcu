@@ -1,5 +1,17 @@
 # Changelog
 
+## [13.2.6] - 2026-07-20
+
+### Fixed
+
+- **Race launch and wheelspin stability** — hold low-gear upshifts whose learned landing RPM would fall below the power band, require meaningful RPM before a third-gear traction upshift, and suppress power-demand downshifts until driven-wheel grip returns. This prevents high-power cars such as the Pagani Huayra from entering `2→3→2` launch loops.
+- **Faster real-limiter recovery** — use a stable live fuel-cut candidate for shift timing before the stricter persisted safety limit is fully confirmed, reducing time spent beyond the usable redline without weakening over-rev protection.
+- **Low and unreachable redlines** — recognize verified fuel-cut patterns down to 78% of Forza's nominal maximum RPM, keep learned shift targets within configured or reachable ceilings, and recover low-gear/high-load plateaus that cannot reach the normal WOT target.
+- **High-gear load plateaus** — recover upshifts at sustained speed/load walls while rejecting ordinary slow RPM growth, braking, wheelspin, throttle lifts, and transient chassis events.
+- **Hill-crest shift hold** — detect brief suspension unloading before full airborne detection and freeze automatic shifts through the crest, preventing floaty high-speed moments from causing an unsafe high-RPM downshift.
+- **Shift safety and acknowledgement** — preserve pending upshifts through Forza's mid-shift gear encoding, retry rejected low-gear commands safely, normalize turbo demand, and keep brake/power downshifts within learned over-rev limits.
+- **Replay regression coverage** — add recorded and synthetic coverage for Nissan Be-1, Ford GT 2005, Pagani Huayra, Shelby Daytona, Lamborghini Huracán STO, low-redline vehicles, hill crests, braking, and low-gear hunting.
+
 ## [13.2.6-pre.4] - 2026-07-16
 
 > **Pre-release**
@@ -33,9 +45,9 @@
 
 > **Pre-release / 预发布测试版**
 >
-> Refines v13.2.5 upshift logic after user replay `跳一档.gz`: no more fixed 80% threshold on gears 1–2; uses RPM-ceiling detection instead. **Please test and report:** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+> Refines v13.2.5 upshift logic after user replay `跳一档.gz`: no more fixed 80% threshold on gears 1–2; uses RPM-ceiling detection instead.
 >
-> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。**请测试并反馈：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。
 
 ### Fixed
 
@@ -222,6 +234,18 @@
 
 # 更新日志
 
+## [13.2.6] - 2026-07-20
+
+### 修复
+
+- **Race 起步与轮滑稳定性** — 当已学习的下一挡落点低于动力区间时保持当前低挡，三挡牵引力升挡前要求足够转速，并在驱动轮恢复抓地前禁止动力降挡，避免 Pagani Huayra 等高性能车辆陷入 `2→3→2` 起步循环。
+- **更快识别实际断油点** — 稳定的实时断油候选可在严格的持久化安全红线完全确认前用于升挡时机，减少发动机停留在有效红线之外的时间，同时不降低防超转保护。
+- **低红线与不可达红线** — 支持确认低至 Forza 名义最高转速 78% 的真实断油特征，将学习目标限制在配置值或已验证可达上限内，并恢复无法达到常规 WOT 目标的低挡及高负载平台升挡。
+- **高挡持续负载平台** — 在持续极速/负载墙下恢复升挡，同时排除正常缓慢爬升、刹车、轮滑、松油和车身瞬态造成的误判。
+- **坡顶换挡保持** — 在完全离地检测触发前识别短暂悬挂卸载并冻结自动换挡，避免高速发飘时错误降入高转低挡。
+- **换挡安全与确认** — 在 Forza 换挡中间挡位编码期间保留待确认升挡，安全重试被拒绝的低挡指令，统一涡轮需求量纲，并保证刹车/动力降挡不超过学习到的安全转速。
+- **回放回归覆盖** — 新增 Nissan Be-1、Ford GT 2005、Pagani Huayra、Shelby Daytona、Lamborghini Huracán STO、低红线车辆、坡顶、刹车和低挡 hunting 的录制与合成测试。
+
 ## [13.2.6-pre.4] - 2026-07-16
 
 > **预发布测试版**
@@ -255,7 +279,7 @@
 
 > **预发布测试版**
 >
-> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。**请测试并反馈：** [becoolove@outlook.com](mailto:becoolove@outlook.com)
+> 在 v13.2.5 基础上细化升档逻辑（用户 replay `跳一档.gz` 反馈）：取消 1–2 档固定 80% 阈值，改为转速触顶检测。
 
 ### 修复
 

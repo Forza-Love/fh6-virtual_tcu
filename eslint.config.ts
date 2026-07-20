@@ -21,6 +21,7 @@ export default antfu(
       'virtual_tcu/',
       '.claude/',
       '.cursor/**',
+      '.superpowers/**',
       '.husky/',
       '.vscode/',
       'docs/',
