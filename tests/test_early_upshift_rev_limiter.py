@@ -213,6 +213,86 @@ def test_rev_limiter_learns_verified_low_nominal_sawtooth():
     }
 
 
+def _feed_sawtooth(det, *, gear: int, nominal: float, peak_pct: float, now: float, frames: int):
+    for i in range(frames):
+        pct = peak_pct if i % 2 == 0 else peak_pct - 0.035
+        td = make_telemetry(
+            gear=gear,
+            current_rpm=nominal * pct,
+            engine_max_rpm=nominal,
+            accel_raw=255,
+        )
+        det.observe(td, last_downshift_time=0.0, now=now + i * 0.016)
+    return td, now + frames * 0.016
+
+
+def test_two_candidate_episodes_across_gears_verify_the_limiter():
+    """13.2.6 fix: an automatic shift consumes the live candidate and resets
+    the per-gear window, so in-gear trust never matures. Two agreeing
+    candidate episodes in different gears must verify the limiter instead of
+    forcing every gear back to fuel cut."""
+    det = RevLimiterDetector()
+    nominal = 10000.0
+
+    # Gear 3: candidate matures (>= CANDIDATE_STABLE_FRAMES) but the pull is
+    # cut short by the shift, well before STABLE_FRAMES.
+    frames = RevLimiterDetector.WINDOW + RevLimiterDetector.CANDIDATE_STABLE_FRAMES + 2
+    td, now = _feed_sawtooth(det, gear=3, nominal=nominal, peak_pct=0.91, now=1000.0, frames=frames)
+    assert det.candidate_redline(td) is not None
+    assert det.is_verified(td.car_key) is False
+
+    # Gear 4 (window resets on gear change): a second short episode at the
+    # same ceiling.
+    td, _ = _feed_sawtooth(
+        det, gear=4, nominal=nominal, peak_pct=0.91, now=now + 1.0, frames=frames
+    )
+    # Third gear change banks the second episode.
+    td5 = make_telemetry(gear=5, current_rpm=nominal * 0.75, engine_max_rpm=nominal, accel_raw=255)
+    det.observe(td5, last_downshift_time=0.0, now=now + 3.0)
+
+    assert det.is_verified(td.car_key)
+    assert det.effective_redline(td) == pytest.approx(nominal * 0.91, rel=0.01)
+
+
+def test_disagreeing_candidate_episodes_do_not_verify():
+    """A premature plateau in one gear must not combine with a real limiter
+    episode at a different RPM into false verification."""
+    det = RevLimiterDetector()
+    nominal = 10000.0
+    frames = RevLimiterDetector.WINDOW + RevLimiterDetector.CANDIDATE_STABLE_FRAMES + 2
+
+    td, now = _feed_sawtooth(det, gear=3, nominal=nominal, peak_pct=0.85, now=1000.0, frames=frames)
+    td, _ = _feed_sawtooth(
+        det, gear=4, nominal=nominal, peak_pct=0.91, now=now + 1.0, frames=frames
+    )
+    td5 = make_telemetry(gear=5, current_rpm=nominal * 0.75, engine_max_rpm=nominal, accel_raw=255)
+    det.observe(td5, last_downshift_time=0.0, now=now + 3.0)
+
+    assert det.is_verified(td.car_key) is False
+
+
+def test_small_downward_peak_drift_keeps_stability_count():
+    """High-gear limiter bounce drifting a few dozen RPM downward must not
+    restart discovery (multi-second waits in the 13.2.6 logs)."""
+    det = RevLimiterDetector()
+    nominal = 10000.0
+    now = 1000.0
+
+    for i in range(RevLimiterDetector.WINDOW + RevLimiterDetector.CANDIDATE_STABLE_FRAMES + 6):
+        # Sawtooth whose ceiling sags ~1 RPM per frame (~60 RPM overall).
+        base = 0.91 - i * 0.0001
+        pct = base if i % 2 == 0 else base - 0.035
+        td = make_telemetry(
+            gear=6,
+            current_rpm=nominal * pct,
+            engine_max_rpm=nominal,
+            accel_raw=255,
+        )
+        det.observe(td, last_downshift_time=0.0, now=now + i * 0.016)
+
+    assert det.candidate_redline(td) is not None
+
+
 def test_legacy_low_redline_stays_unverified_until_live_confirmation():
     det = RevLimiterDetector()
     det.load(CAR_KEY, 0.84 * 8000)

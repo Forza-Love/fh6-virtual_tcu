@@ -68,3 +68,5 @@ node_modules
 
 .claude/*.local.json
 .reasonix/
+
+docs/superpowers/

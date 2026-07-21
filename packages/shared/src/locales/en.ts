@@ -93,6 +93,8 @@ export default {
     currentCar: 'Current car',
     calibrated: 'CALIBRATED',
     learning: 'LEARNING…',
+    relearn: 'Relearn',
+    relearnConfirm: 'Clear the current car profile and learn it again?',
     hint: 'Auto-learns gear ratios from telemetry. Improves shift accuracy.',
   },
   driveStyle: {

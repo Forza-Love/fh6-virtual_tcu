@@ -91,6 +91,8 @@ export default {
     currentCar: '当前车辆',
     calibrated: '已标定',
     learning: '学习中…',
+    relearn: '重新学习',
+    relearnConfirm: '确定清除当前车辆的学习数据并重新学习？',
     hint: '根据遥测自动学习各档齿比，提升换挡精度。',
   },
   driveStyle: {

@@ -1,12 +1,24 @@
 <script setup lang="ts">
-  import { EyeOutline, OpenOutline } from '@vicons/ionicons5'
-  import { NButton, NCard, NDivider, NFlex, NGrid, NGridItem, NIcon, NTag, NText } from 'naive-ui'
+  import { EyeOutline, OpenOutline, RefreshOutline } from '@vicons/ionicons5'
+  import {
+    NButton,
+    NCard,
+    NDivider,
+    NFlex,
+    NGrid,
+    NGridItem,
+    NIcon,
+    NTag,
+    NText,
+    useDialog,
+  } from 'naive-ui'
   import { inject } from 'vue'
   import { settingsContextKey } from './context'
   import SettingsHud from './SettingsHud.vue'
 
   const ctx = inject(settingsContextKey)!
   const { t, store, driveModes, dashboardUrl, lanUrl, udpPort, openDashboard, toggleHud } = ctx
+  const dialog = useDialog()
 
   function modeColor(id: string) {
     return (
@@ -24,6 +36,16 @@
 
   function modeTagText(id: string, i18nKey: string) {
     return `${t(`modes.${i18nKey}.name`)} · ${t(`modes.${i18nKey}.tag`).toUpperCase()}`
+  }
+
+  function relearnProfile() {
+    dialog.warning({
+      title: t('calibration.relearn'),
+      content: t('calibration.relearnConfirm'),
+      positiveText: t('modal.confirm'),
+      negativeText: t('modal.cancel'),
+      onPositiveClick: () => store.relearnProfile(),
+    })
   }
 </script>
 
@@ -148,6 +170,18 @@
                 : t('calibration.learning')
             }}
           </NTag>
+          <NButton
+            size="small"
+            type="error"
+            ghost
+            :disabled="!store.telemetry.value?.calibrated"
+            @click="relearnProfile"
+          >
+            <template #icon>
+              <NIcon :component="RefreshOutline" />
+            </template>
+            {{ t('calibration.relearn') }}
+          </NButton>
           <NText depth="3" style="font-size: 12px">
             {{ t('calibration.hint') }}
           </NText>

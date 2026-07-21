@@ -12,11 +12,13 @@ class Cfg:
     LOW_GEAR_LOCK_MS = 400
     # Wait for the game to acknowledge an upshift before retrying (prevents E-key spam).
     UPSHIFT_PENDING_TIMEOUT_S = 0.7
-    # After a low-gear upshift is rejected, wait this long before clearing the soft cap
-    # and allowing another attempt (still at WOT / redline).
+    # After an upshift is rejected, wait this long before clearing the soft cap
+    # and allowing another attempt (still at WOT / redline). Repeated failures
+    # at the same gear double the wait, up to the max backoff — a true top gear
+    # settles into one probe per UPSHIFT_CAP_MAX_BACKOFF_S instead of a
+    # permanent lockout that would break 7-10 speed transmissions.
     UPSHIFT_CAP_RETRY_S = 0.8
-    # At/above this gear, a rejected upshift keeps a hard cap (e.g. 6-speed cannot take 7th).
-    UPSHIFT_CAP_HARD_FROM_GEAR = 6
+    UPSHIFT_CAP_MAX_BACKOFF_S = 8.0
     REVERSE_EXIT_LOCK_S = 2.0
     ANTI_STALL_RPM = 1100
     MIN_SPEED_KMH = 12.0

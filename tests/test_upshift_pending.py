@@ -32,9 +32,103 @@ def test_upshift_pending_blocks_repeat(make_logic, out, clock):
     assert len(ups) == 1
 
 
-def test_failed_upshift_caps_top_gear(make_logic, out, clock):
+def test_failed_high_gear_upshift_backs_off_without_permanent_cap(make_logic, out, clock):
+    """One missed ack at 6th is not proof of a 6-speed box: retries continue
+    with exponential backoff (no per-frame spam, no permanent lockout)."""
     tcu = make_logic("COMFORT")
     td = make_telemetry(
+        gear=6,
+        current_rpm=7600,
+        engine_max_rpm=8000.0,
+        speed_ms=200.0 / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+    )
+    for _ in range(300):  # 4.8 s
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td)
+    ups = [s for s in out.shifts if s[0] == "UP"]
+    # timeout 0.7s + backoff 0.8/1.6/3.2... → a handful of probes, not spam.
+    assert 2 <= len(ups) <= 4
+    # The cap is soft: still recorded, but with retry state, not permanent.
+    assert tcu._upshift_cap_by_key.get(CAR_KEY, 10) <= 6
+    assert tcu._upshift_fail_count[CAR_KEY] >= 2
+
+
+def test_true_top_gear_settles_into_bounded_probing(make_logic, out, clock):
+    """A genuine top gear must not receive unbounded repeated commands."""
+    tcu = make_logic("COMFORT")
+    td = make_telemetry(
+        gear=6,
+        current_rpm=7600,
+        engine_max_rpm=8000.0,
+        speed_ms=200.0 / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+    )
+    for _ in range(2000):  # 32 s at fuel cut in the true top gear
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td)
+    ups = [s for s in out.shifts if s[0] == "UP"]
+    # After backoff saturates at UPSHIFT_CAP_MAX_BACKOFF_S (8 s), the steady
+    # state is at most ~one probe per 8.7 s.
+    assert len(ups) <= 7
+
+
+def test_ten_speed_recovers_from_one_lost_high_gear_command(make_logic, out, clock):
+    """A lost 8→9 command on a 10-speed must not permanently cap 8th."""
+    tcu = make_logic("COMFORT")
+    td8 = make_telemetry(
+        gear=8,
+        current_rpm=7600,
+        engine_max_rpm=8000.0,
+        speed_ms=280.0 / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+    )
+    # First command is lost: no ack for well past the pending timeout.
+    for _ in range(60):  # ~1 s → timeout fires, soft cap at 8
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td8)
+    assert tcu._upshift_cap_by_key[CAR_KEY] == 8
+
+    # Keep demanding power: the retry must fire after backoff.
+    for _ in range(120):  # ~1.9 s more
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td8)
+    ups = [s for s in out.shifts if s[0] == "UP"]
+    assert len(ups) >= 2, "retry after backoff never fired"
+
+    # This time the game acknowledges 9th: all failure state must clear.
+    td9 = make_telemetry(
+        gear=9,
+        current_rpm=7500,
+        engine_max_rpm=8000.0,
+        speed_ms=300.0 / 3.6,
+        accel_raw=255,
+        brake_raw=0,
+    )
+    # Short window: long enough for the 9→10 command, before its own pending
+    # timeout would re-cap (the fed telemetry never acknowledges).
+    for _ in range(45):
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td9)
+    assert tcu._upshift_cap_by_key[CAR_KEY] == 10
+    assert CAR_KEY not in tcu._upshift_fail_count
+    # And 9→10 must still be commandable.
+    ups = [s for s in out.shifts if s[0] == "UP"]
+    assert len(ups) >= 3, "9→10 was blocked by stale cap state"
+
+
+def test_downshift_restarts_cap_retry_backoff(make_logic, out, clock):
+    """A downshift invalidates the evidence behind a suspected cap."""
+    tcu = make_logic("COMFORT")
+    td6 = make_telemetry(
         gear=6,
         current_rpm=7600,
         engine_max_rpm=8000.0,
@@ -45,10 +139,21 @@ def test_failed_upshift_caps_top_gear(make_logic, out, clock):
     for _ in range(300):
         clock.now += 0.016
         out.now = clock.now
-        tcu.process(td)
-    ups = [s for s in out.shifts if s[0] == "UP"]
-    assert len(ups) == 1
-    assert tcu._upshift_cap_by_key[CAR_KEY] == 6
+        tcu.process(td6)
+    assert tcu._upshift_fail_count[CAR_KEY] >= 2
+
+    td5 = make_telemetry(
+        gear=5,
+        current_rpm=6000,
+        engine_max_rpm=8000.0,
+        speed_ms=180.0 / 3.6,
+        accel_raw=128,
+        brake_raw=0,
+    )
+    clock.now += 0.016
+    out.now = clock.now
+    tcu.process(td5)
+    assert CAR_KEY not in tcu._upshift_fail_count
 
 
 def test_failed_low_gear_upshift_retries_at_redline(make_logic, out, clock):

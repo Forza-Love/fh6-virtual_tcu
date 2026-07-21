@@ -1,12 +1,23 @@
 <script setup lang="ts">
   import { RefreshOutline } from '@vicons/ionicons5'
-  import { NButton, NCard, NFlex, NIcon, NSlider, NText } from 'naive-ui'
+  import { NButton, NCard, NFlex, NIcon, NSlider, NText, useDialog } from 'naive-ui'
   import { inject } from 'vue'
   import { settingsContextKey } from './context'
   import FeatureToggleList from './FeatureToggleList.vue'
 
   const ctx = inject(settingsContextKey)!
   const { t, store, featureToggles, settingsSliders, configNumber, configBool, sliderUnit } = ctx
+  const dialog = useDialog()
+
+  function resetConfig() {
+    dialog.warning({
+      title: t('settings.reset'),
+      content: t('settings.resetConfirm'),
+      positiveText: t('modal.confirm'),
+      negativeText: t('modal.cancel'),
+      onPositiveClick: () => store.resetConfig(),
+    })
+  }
 </script>
 
 <template>
@@ -44,7 +55,7 @@
         <NText depth="3" style="font-size: 12px">
           {{ t('settings.autosave') }}
         </NText>
-        <NButton type="error" ghost size="small" @click="store.resetConfig">
+        <NButton type="error" ghost size="small" @click="resetConfig">
           <template #icon>
             <NIcon :component="RefreshOutline" />
           </template>

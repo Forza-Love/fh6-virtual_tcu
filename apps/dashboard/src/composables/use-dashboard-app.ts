@@ -38,6 +38,10 @@ export function useDashboardApp() {
     store.openImportProfile(t('modal.importTitle'))
   }
 
+  function onRelearnProfile() {
+    store.relearnProfile()
+  }
+
   return {
     store,
     isFullUi,
@@ -57,6 +61,7 @@ export function useDashboardApp() {
     config: store.config as ConfigMap,
     modal: store.modal,
     onSetMode: (mode: string) => store.setMode(mode as DriveMode),
+    onRelearnProfile,
     onLogStart: (mode: string) =>
       store.logStart(mode as 'events' | 'all', String(store.config.log_output_format ?? 'bin.gz')),
     onSetConfig,

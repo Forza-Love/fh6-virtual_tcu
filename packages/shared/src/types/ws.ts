@@ -42,14 +42,15 @@ export type WsOutbound =
   | { type: 'set_web_bind'; host: string; port: number }
   | { type: 'set_network'; web_host: string; web_port: number; udp_port: number }
   | {
-    type: 'save_network_and_restart'
-    web_host: string
-    web_port: number
-    udp_port: number
-    udp_hub_enabled: boolean
-    udp_hub_targets: string
-  }
+      type: 'save_network_and_restart'
+      web_host: string
+      web_port: number
+      udp_port: number
+      udp_hub_enabled: boolean
+      udp_hub_targets: string
+    }
   | { type: 'reset_config' }
+  | { type: 'relearn_profile' }
   | { type: 'log_start'; mode: string; format?: string }
   | { type: 'log_stop'; save_as?: 'file' | 'fusion_snapshot'; reason?: string }
   | { type: 'trigger_fusion_snapshot'; reason?: string }
@@ -67,6 +68,7 @@ export type WsInbound =
   | { type: 'log_conversion'; ok: boolean; format: string; files?: string[]; error?: string }
   | { type: 'profile_export'; data: unknown }
   | { type: 'profile_imported'; ok: boolean; data?: ConfigMap; error?: string }
+  | { type: 'profile_relearned'; ok: boolean; profile_key?: string | null }
   | { type: 'graph_data'; data: unknown }
   | { type: 'network_changed'; ok?: boolean; error?: string; data: WebUrls }
   | { type: 'web_bind_changed'; ok?: boolean; error?: string; data: WebUrls }

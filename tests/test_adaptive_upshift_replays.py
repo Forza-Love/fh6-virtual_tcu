@@ -183,10 +183,13 @@ def test_20260716_nissan_reaches_each_upshift_before_recorded_ack(monkeypatch, t
 def test_20260716_ford_requests_fifth_before_top_speed(monkeypatch, tmp_path):
     commands = _replay_commands(FORD_20260716, monkeypatch, tmp_path)
 
+    # 4th-gear RPM creeps 83→86% until ~51 s, so the stricter 13.2.6 plateau
+    # evidence (pinned RPM + extended hold for low peaks) confirms at ~58.6 s —
+    # still well before the recorded braking at ~88.5 s.
     assert [
         c
         for c in commands
-        if c["from"] == 4 and c["to"] == 5 and c["state"] == "UPSHIFT" and c["ms"] < 50_000
+        if c["from"] == 4 and c["to"] == 5 and c["state"] == "UPSHIFT" and c["ms"] < 62_000
     ]
 
 
