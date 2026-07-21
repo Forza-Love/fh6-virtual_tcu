@@ -151,8 +151,14 @@ class WebServer:
             await self._apply_network(msg)
         elif t == "reset_config":
             self._config.reset()
+            self._tcu.set_mode(str(self._config.get("current_mode", "COMFORT")))
             self._tcu.refresh_shift_keys()
-            await ws.send_json({"type": "config_reset", "data": self._config.data})
+            await self._broadcast_json({"type": "config_reset", "data": self._config.data})
+        elif t == "relearn_profile":
+            ok, profile_key = self._tcu.relearn_current_profile()
+            await self._broadcast_json(
+                {"type": "profile_relearned", "ok": ok, "profile_key": profile_key}
+            )
         elif t == "log_start":
             mode = msg.get("mode", "events")
             output_format = msg.get("format", self._config.get("log_output_format", "bin.gz"))

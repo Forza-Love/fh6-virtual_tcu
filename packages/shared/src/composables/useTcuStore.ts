@@ -130,6 +130,12 @@ export function useTcuStore() {
           Object.assign(config, msg.data)
         }
         break
+      case 'profile_relearned':
+        if (msg.ok && telemetry.value) {
+          telemetry.value.calibrated = false
+          telemetry.value.power_curve_learned = false
+        }
+        break
       case 'web_bind_changed':
       case 'network_changed':
         webBindStatus.value = { ok: msg.ok !== false, error: msg.error }
@@ -197,6 +203,10 @@ export function useTcuStore() {
 
   function resetConfig() {
     send({ type: 'reset_config' })
+  }
+
+  function relearnProfile() {
+    send({ type: 'relearn_profile' })
   }
 
   function restartBackend() {
@@ -336,6 +346,7 @@ export function useTcuStore() {
     applyNetwork,
     saveNetworkAndRestart,
     resetConfig,
+    relearnProfile,
     restartBackend,
     logStart,
     logStop,

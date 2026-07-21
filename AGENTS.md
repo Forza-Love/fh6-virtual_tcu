@@ -40,6 +40,25 @@ See `CLAUDE.md` and root `package.json`. Typical Linux validation loop:
 
 GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, ESLint, Ruff, `build:dashboard`, and `build:electron` on Ubuntu — **not** pytest.
 
+### Release rule: profile learning schema
+
+`PROFILE_SCHEMA_VERSION` in `virtual_tcu/storage/profiles.py` versions the persisted learning-data contract in `tcu_profiles.json`. It is **not** the application/package version and must not be changed as routine release bookkeeping.
+
+For every release, review whether the changes alter persisted profile compatibility:
+
+- **Do not increment `PROFILE_SCHEMA_VERSION`** for ordinary application releases, UI/config changes, logging changes, shift-rule thresholds/timers, command retry behavior, or estimator fixes that can safely continue using the existing stored fields with the same units and meaning.
+- **Increment it** only when the whole profile file can no longer be loaded safely, such as an incompatible JSON envelope/key format change, changed units or meaning of required persisted fields, or estimator semantics that make existing accumulated learning unsafe and cannot be validated or migrated component-by-component.
+- If incompatibility affects only one learning component (for example the rev-limiter estimator), prefer that component's own serialization version and invalidate/migrate only that component instead of resetting every car profile.
+- Prefer a backward-compatible migration when it can preserve trustworthy learning. A global schema bump is the last resort because it forces all users to relearn every vehicle.
+- A schema bump happens once per incompatible persistence transition, regardless of how many application releases include or follow that transition. Document the reason in the spec/release notes.
+
+When changing `PROFILE_SCHEMA_VERSION`, add or update tests proving that:
+
+1. a matching schema keeps learned profiles and the active profile across restart;
+2. a missing/mismatched schema is backed up and reset for relearning;
+3. profile keys and stored `tune_signature` values remain consistent;
+4. an ordinary application version change does not invalidate profiles while the schema version is unchanged.
+
 ### Optional: Web UI smoke on Linux
 
 After `pnpm build:dashboard`, you can serve the dashboard with aiohttp by running `WebServer` from a small inline/async script with `TCULogic` + `FakeOutput` (see `tests/conftest.py`). The real app entrypoint `main()` will not start on Linux. Vite dev (`pnpm dev:dashboard`, port 5173) proxies `/ws` to `127.0.0.1:8765` and needs a backend on that port.

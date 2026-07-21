@@ -72,10 +72,12 @@ def test_valid_raw_boost_remains_the_turbo_target(make_logic):
     assert tcu._turbo_target(td) == pytest.approx(1.2)
 
 
-def _high_gear_plateau_telemetry():
+def _high_gear_plateau_telemetry(rpm_pct: float = 0.89):
+    """Near-limiter plateau by default — only RPM the engine plausibly cannot
+    exceed may lower the Race WOT target (see 13.2.6 root-cause analysis)."""
     return make_telemetry(
         gear=4,
-        current_rpm=0.82 * 8000,
+        current_rpm=rpm_pct * 8000,
         engine_max_rpm=8000,
         speed_ms=300 / 3.6,
         accel_raw=255,
@@ -106,7 +108,34 @@ def test_sustained_high_gear_load_plateau_triggers_upshift(make_logic, out, cloc
     assert len(_upshifts(out)) == 1
 
 
-def test_sustained_plateau_uses_remapped_profile_key(make_logic, out, clock):
+def test_low_rpm_speed_pause_needs_extended_evidence(make_logic, out, clock):
+    """13.2.6 regression: a ~1 s road-speed pause at 82% is ordinary high-gear
+    acceleration and must not shift; only an RPM pinned well beyond the
+    extended hold proves an actually unreachable target."""
+    tcu = make_logic("RACE")
+    td = _high_gear_plateau_telemetry(rpm_pct=0.82)
+
+    _feed_plateau(tcu, out, clock, td, 110)  # ~1.76 s — old code shifted here
+    assert _upshifts(out) == []
+
+    _feed_plateau(tcu, out, clock, td, 90)  # pinned past the extended hold
+    assert len(_upshifts(out)) == 1
+
+
+def test_slowly_creeping_low_plateau_never_confirms(make_logic, out, clock):
+    """RPM still creeping upward (the 13.2.6 log shape) must never be read
+    as an unreachable ceiling, no matter how long it lasts."""
+    tcu = make_logic("RACE")
+    td = _high_gear_plateau_telemetry(rpm_pct=0.81)
+    for i in range(250):
+        td.current_rpm = (0.81 + i * 0.0002) * td.engine_max_rpm
+        td.speed_ms = (300 + i * 0.04) / 3.6
+        _feed_plateau(tcu, out, clock, td, 1)
+
+    assert _upshifts(out) == []
+
+
+def test_sustained_plateau_rebinds_stale_profile_key_to_stable_signature(make_logic, out, clock):
     tcu = make_logic("RACE")
     probe = _high_gear_plateau_telemetry()
     remapped_profile_id = probe.tune_signature + 1
@@ -117,7 +146,7 @@ def test_sustained_plateau_uses_remapped_profile_key(make_logic, out, clock):
         td.profile_tune_id = 0
         feed(tcu, out, clock, td, 1)
 
-    assert td.profile_tune_id == remapped_profile_id
+    assert td.profile_tune_id == probe.tune_signature
     assert len(_upshifts(out)) == 1
 
 
@@ -200,7 +229,9 @@ def test_load_plateau_continuity_resets_on_transient(make_logic, out, clock, bre
     _feed_plateau(tcu, out, clock, td, 50)
     assert _upshifts(out) == []
 
-    _feed_plateau(tcu, out, clock, td, 35)
+    # Long enough for the growth-breaker samples to age out of the
+    # time-normalized window (1.4 s) plus the 1.0 s confirmation span.
+    _feed_plateau(tcu, out, clock, td, 60)
     assert len(_upshifts(out)) == 1
 
 

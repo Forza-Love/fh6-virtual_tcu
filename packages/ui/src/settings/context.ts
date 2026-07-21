@@ -67,6 +67,7 @@ export interface SettingsContext {
       udpHubTargets: string,
     ) => void
     resetConfig: () => void
+    relearnProfile: () => void
     send: (msg: Record<string, unknown>) => void
     closeModal: () => void
     confirmModal: () => void

@@ -96,6 +96,31 @@ def test_short_crest_exposes_unweighted_hold_without_airborne_state():
     assert not det.is_unweighted
 
 
+def test_sustained_unweighted_grade_releases_after_bound():
+    """A downhill grade that keeps accel_y below UNWEIGHTED_G for seconds is
+    not a crest — the hold must release so descent recovery can act."""
+    det = AirtimeDetector()
+    grade = make_telemetry(speed_ms=180 / 3.6, accel_y=-3.5)
+    now = 0.0
+    for _ in range(30):  # 0.48 s — within the continuous bound
+        now += 0.016
+        det.update(grade, now)
+    assert det.is_unweighted
+    for _ in range(60):  # past UNWEIGHTED_MAX_CONTINUOUS_S total
+        now += 0.016
+        det.update(grade, now)
+    assert not det.is_unweighted
+    assert not det.is_airborne
+
+    # After the raw signal clears, a fresh crest re-arms the hold.
+    settled = make_telemetry(speed_ms=180 / 3.6, accel_y=0.0)
+    now += 0.3
+    det.update(settled, now)
+    now += 0.016
+    det.update(grade, now)
+    assert det.is_unweighted
+
+
 def test_hysteresis_band_does_not_flap():
     """accel_y sitting in the -6..-4 band (neither falling nor grounded)
     must not toggle the state once airborne."""

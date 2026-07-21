@@ -210,6 +210,50 @@ def test_grounded_mismatch_downshifts(make_logic, out, clock):
     assert Cfg.MIN_SPEED_KMH < 30  # sanity: not the standstill path
 
 
+def test_race_descent_downshift_recovers_above_coast_floor(make_logic, out, clock):
+    """13.2.6 gap: gravity holds downhill RPM above the 30% coast floor and
+    light maintenance throttle disables the coast path — Race must still
+    select an engine-braking gear on a sustained descent."""
+    tcu = make_logic("RACE")
+    # gear 5, ratio 35: 100 km/h -> 3500 rpm (43% — above race_coast_rpm 30%).
+    speed = 100.0
+    for _ in range(90):  # ~1.44 s of accelerating descent, light throttle
+        speed += 0.06  # ~3.75 km/h/s gain with no meaningful pedal input
+        td = make_telemetry(
+            gear=5,
+            speed_ms=speed / 3.6,
+            current_rpm=35 * speed,
+            accel_raw=int(0.10 * 255),
+            brake_raw=0,
+        )
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td)
+    assert "DOWN" in _kinds(out)
+    assert tcu._tcu_state in ("ENGINE BRAKE", "POST-SHIFT")
+
+
+def test_race_descent_downshift_never_selects_unsafe_gear(make_logic, out, clock):
+    """A descent downshift is blocked by the hunt/over-rev guards when the
+    lower gear would land at or beyond the usable ceiling."""
+    tcu = make_logic("RACE")
+    # gear 3 at 140 km/h: gear 2 (ratio 80) would land at 11200 rpm >> ceiling.
+    speed = 140.0
+    for _ in range(90):
+        speed += 0.06
+        td = make_telemetry(
+            gear=3,
+            speed_ms=speed / 3.6,
+            current_rpm=58 * speed * 0.5,  # keep displayed rpm low
+            accel_raw=0,
+            brake_raw=0,
+        )
+        clock.now += 0.016
+        out.now = clock.now
+        tcu.process(td)
+    assert "DOWN" not in _kinds(out) and "DOWN2" not in _kinds(out)
+
+
 def test_unweighted_crest_holds_power_downshift(make_logic, out, clock):
     tcu = make_logic("RACE")
     crest = make_telemetry(

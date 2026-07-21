@@ -41,6 +41,11 @@ class AirtimeDetector:
     FRAMES_TO_DISENGAGE = 2
     LANDING_WINDOW_S = 0.75
     UNWEIGHTED_HOLD_S = 0.25
+    # A crest hold is meant for a brief suspension unload. A sustained
+    # downhill grade can keep accel_y below UNWEIGHTED_G for many seconds —
+    # renewing the hold there would freeze every automatic shift exactly when
+    # descent recovery is needed, so bound the continuous hold.
+    UNWEIGHTED_MAX_CONTINUOUS_S = 1.0
 
     def __init__(self):
         self._air_streak = 0
@@ -48,6 +53,7 @@ class AirtimeDetector:
         self._is_airborne = False
         self._landing_until = 0.0
         self._unweighted_until = 0.0
+        self._unweighted_since = 0.0
         self._is_unweighted = False
 
     def update(self, td: Telemetry, now: float) -> AirState:
@@ -55,7 +61,17 @@ class AirtimeDetector:
         unweighted = td.accel_y < self.UNWEIGHTED_G and td.speed_kmh > self.MIN_SPEED_FOR_AIRBORNE
         if unweighted:
             self._unweighted_until = now + self.UNWEIGHTED_HOLD_S
-        self._is_unweighted = unweighted or now < self._unweighted_until
+        held = unweighted or now < self._unweighted_until
+        if held:
+            if self._unweighted_since == 0.0:
+                self._unweighted_since = now
+            elif (now - self._unweighted_since) > self.UNWEIGHTED_MAX_CONTINUOUS_S:
+                # Edge-bounded: a hold that keeps renewing is a grade, not a
+                # crest. Stay released until the raw signal actually clears.
+                held = False
+        else:
+            self._unweighted_since = 0.0
+        self._is_unweighted = held
         # Hysteresis band (-6 .. -4): neither vote advances, so a value hovering
         # near the threshold can't flap the state.
         grounded = td.accel_y > self.GROUND_G

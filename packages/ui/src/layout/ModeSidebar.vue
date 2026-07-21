@@ -2,7 +2,9 @@
   import type { TelemetrySnapshot } from '@virtual-tcu/shared/types/telemetry'
   import { DRIVE_MODES } from '@virtual-tcu/shared/config/modes'
   import { modeBtnClass, REGIME_PILL } from '@virtual-tcu/shared/utils/mode-colors'
+  import { useDialog } from 'naive-ui'
   import { toRefs } from 'vue'
+  import { useI18n } from 'vue-i18n'
   import { badgeCalibrated, badgeLearning, cardSm, col, sectionTitle } from '../styles/ui'
   import { useModeSidebar } from './mode-sidebar'
 
@@ -21,6 +23,7 @@
   )
   const emit = defineEmits<{
     setMode: [mode: string]
+    relearn: []
   }>()
 
   const { telemetry, interactive } = toRefs(props)
@@ -37,6 +40,18 @@
   } = useModeSidebar(telemetry)
 
   const isCalibrated = () => !!telemetry.value?.calibrated
+  const { t } = useI18n()
+  const dialog = useDialog()
+
+  function confirmRelearn() {
+    dialog.warning({
+      title: t('calibration.relearn'),
+      content: t('calibration.relearnConfirm'),
+      positiveText: t('modal.confirm'),
+      negativeText: t('modal.cancel'),
+      onPositiveClick: () => emit('relearn'),
+    })
+  }
 </script>
 
 <template>
@@ -87,9 +102,20 @@
       <div class="text-tcu-txt-dim mb-1.5 text-[11px]">
         {{ $t('calibration.currentCar') }}
       </div>
-      <span :class="isCalibrated() ? badgeCalibrated : badgeLearning">
-        {{ isCalibrated() ? $t('calibration.calibrated') : $t('calibration.learning') }}
-      </span>
+      <div class="flex items-center justify-between gap-2">
+        <span :class="isCalibrated() ? badgeCalibrated : badgeLearning">
+          {{ isCalibrated() ? $t('calibration.calibrated') : $t('calibration.learning') }}
+        </span>
+        <button
+          v-if="interactive"
+          type="button"
+          class="border-tcu-border text-tcu-txt-dim hover:border-danger/60 hover:text-danger cursor-pointer rounded border px-2 py-1 text-[10px] transition disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="!isCalibrated()"
+          @click="confirmRelearn"
+        >
+          {{ $t('calibration.relearn') }}
+        </button>
+      </div>
       <div class="text-tcu-txt-dim mt-2 text-[11px] leading-snug">
         {{ $t('calibration.hint') }}
       </div>

@@ -27,6 +27,7 @@
     config,
     modal,
     onSetMode,
+    onRelearnProfile,
     onSetConfig,
     onSaveNetworkAndRestart,
     onResetConfig,
@@ -53,6 +54,7 @@
         :telemetry="telemetry"
         :interactive="isFullUi"
         @set-mode="onSetMode"
+        @relearn="onRelearnProfile"
       />
       <DashboardPanel :live="live" :telemetry="telemetry" />
       <SettingsPanel

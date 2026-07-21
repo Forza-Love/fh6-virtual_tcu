@@ -37,6 +37,19 @@ class RevLimiterDetector:
     MIN_EDGE_RPM = 40.0
     MIN_RISES = 2
     MIN_DROPS = 2
+    # Once a shift consumes a live candidate, the per-gear window resets and
+    # the in-gear STABLE_FRAMES trust can never mature under automatic
+    # operation. Independent candidate episodes (different gears / pulls) that
+    # agree within this tolerance are therefore combined into a verified
+    # limiter, so later gears reuse the discovery instead of re-paying the
+    # fuel-cut cost.
+    CROSS_GEAR_CONFIRMS = 2
+    CROSS_GEAR_EPS_FRAC = 0.015
+    MAX_BANKED_OBSERVATIONS = 8
+    # Downward peak drift while bouncing on the limiter (heat, small grade
+    # changes) must not restart the stability count — only a *rising* peak
+    # means the engine is still climbing.
+    PEAK_DRIFT_DOWN_EPS = 120.0
 
     def __init__(self):
         self._redline: dict[tuple, float] = {}
@@ -45,11 +58,38 @@ class RevLimiterDetector:
         self._active_gear: dict[tuple, int] = {}
         self._verified: set[tuple] = set()
         self._candidate: dict[tuple, float] = {}
+        self._episode_peak: dict[tuple, float] = {}
+        self._observations: dict[tuple, list[float]] = {}
 
     def _reset(self, car: tuple):
+        self._bank_episode(car)
         self._rpm_window.pop(car, None)
         self._peak_hold.pop(car, None)
         self._candidate.pop(car, None)
+
+    def _bank_episode(self, car: tuple):
+        """Store a finished candidate episode as cross-gear limiter evidence."""
+        peak = self._episode_peak.pop(car, None)
+        if peak is None:
+            return
+        obs = self._observations.setdefault(car, [])
+        obs.append(peak)
+        if len(obs) > self.MAX_BANKED_OBSERVATIONS:
+            del obs[: len(obs) - self.MAX_BANKED_OBSERVATIONS]
+        self._try_cross_gear_confirm(car)
+
+    def _try_cross_gear_confirm(self, car: tuple):
+        if car in self._verified:
+            return
+        obs = self._observations.get(car, [])
+        if len(obs) < self.CROSS_GEAR_CONFIRMS:
+            return
+        best = max(obs)
+        eps = best * self.CROSS_GEAR_EPS_FRAC
+        agreeing = [p for p in obs if best - p <= eps]
+        if len(agreeing) >= self.CROSS_GEAR_CONFIRMS:
+            self._redline[car] = best
+            self._verified.add(car)
 
     def observe(
         self,
@@ -91,6 +131,7 @@ class RevLimiterDetector:
         # Must be high enough to be a plausible limiter, and oscillating
         # (the sawtooth) — a flat WOT hill-crawl is rejected here.
         if wmax < td.engine_max_rpm * self.MIN_PEAK_PCT or (wmax - wmin) < self.MIN_OSCILLATION:
+            self._bank_episode(car)
             self._peak_hold.pop(car, None)
             self._candidate.pop(car, None)
             return
@@ -101,20 +142,28 @@ class RevLimiterDetector:
         if rises < self.MIN_RISES or drops < self.MIN_DROPS:
             # One impact, shift transient, or telemetry dip is not the
             # repeated sawtooth signature of fuel cut.
+            self._bank_episode(car)
             self._peak_hold.pop(car, None)
             self._candidate.pop(car, None)
             return
 
         anchor_peak, held_frames = self._peak_hold.get(car, (wmax, 0))
-        if abs(wmax - anchor_peak) <= self.PEAK_EPS:
-            held_frames += 1
-        else:
-            anchor_peak, held_frames = wmax, 0  # peak moved → still climbing
+        if wmax > anchor_peak + self.PEAK_EPS:
+            # Rising peak → the engine is still climbing; any earlier
+            # candidate was premature and must not count as evidence.
+            anchor_peak, held_frames = wmax, 0
             self._candidate.pop(car, None)
+            self._episode_peak.pop(car, None)
+        elif wmax < anchor_peak - self.PEAK_DRIFT_DOWN_EPS:
+            anchor_peak, held_frames = wmax, 0
+            self._candidate.pop(car, None)
+        else:
+            held_frames += 1
         self._peak_hold[car] = (anchor_peak, held_frames)
 
         if held_frames >= self.CANDIDATE_STABLE_FRAMES:
             self._candidate[car] = max(anchor_peak, wmax)
+            self._episode_peak[car] = max(self._episode_peak.get(car, 0.0), anchor_peak, wmax)
 
         if held_frames >= self.STABLE_FRAMES:
             confirmed_peak = max(anchor_peak, wmax)

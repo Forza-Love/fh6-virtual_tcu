@@ -36,6 +36,10 @@ from virtual_tcu.telemetry.model import Telemetry
 
 
 class TCULogic:
+    # Engine fields can be transient during car/load transitions. A changed
+    # signature must remain stable before it replaces the active profile key.
+    TUNE_SIGNATURE_STABLE_FRAMES = 20
+
     def __init__(
         self,
         kb: OutputInterface,
@@ -76,6 +80,10 @@ class TCULogic:
         self._load_plateau_key: tuple[tuple, int, str] | None = None
         self._load_plateau_since = 0.0
         self._load_plateau_reached = False
+        self._load_plateau_peak = 0.0
+        self._load_plateau_pinned_since = 0.0
+        self._plateau_samples: deque[tuple[float, float, float]] = deque()
+        self._descent_samples: deque[tuple[float, float]] = deque()
         self._brake_raw_history = deque(maxlen=10)
         self._throttle_raw_history = deque(maxlen=10)
         self._no_downshift_until = 0.0
@@ -93,12 +101,14 @@ class TCULogic:
         self._pending_upshift_until = 0.0
         self._upshift_cap_by_key: dict[tuple, int] = {}
         self._upshift_cap_set_at: dict[tuple, float] = {}
+        self._upshift_fail_count: dict[tuple, int] = {}
 
         self._reverse_lock_until = 0.0
         self._current_car_key: tuple | None = None
         self._tune_id_by_base: dict[tuple[int, int, int], int] = {}
+        self._tune_signature_candidate_by_base: dict[tuple[int, int, int], tuple[int, int]] = {}
         self._profile_baseline_gear1: dict[tuple, float] = {}
-        self._active_tune_signature: int | None = None
+        self._profile_save_milestones: dict[tuple, tuple[int, bool, bool]] = {}
         self._was_race_on = False
 
         self._reverse_hold = ReverseHoldDetector(kb)
@@ -137,42 +147,73 @@ class TCULogic:
         if Cfg.REVERSE_HOLD_MS > 0:
             self._setup_paddle_listeners()
 
-    def save_profiles(self):
+    def save_profiles(self) -> bool:
         """Persist all learning data to ProfileStore for the current car."""
         ck = self._current_car_key
         if ck is None or ck[0] <= 0:
-            return
-        profile: dict = {}
+            return False
         gr = self._calibrator.dump(ck)
-        if gr is not None:
-            profile["gear_ratios"] = gr["ratios"]
-            profile["gear_counts"] = gr["counts"]
+        # A stored profile key is the durable "learned" marker used by the UI.
+        # Do not create partial entries before at least two gear ratios exist.
+        if gr is None:
+            return False
+        profile: dict = {
+            "gear_ratios": gr["ratios"],
+            "gear_counts": gr["counts"],
+        }
         pc = self._power_curve.dump(ck)
         if pc is not None:
             profile["power_curve"] = pc
         rl = self._rev_limiter.dump(ck)
         if rl is not None:
             profile["rev_limiter"] = rl
-        if profile:
-            from datetime import datetime
+        from datetime import datetime
 
-            profile["updated_at"] = datetime.now(UTC).isoformat()
-            if self._current_car_key == ck:
-                # Last seen telemetry for this slot (set in _sync_profile_tune_id).
-                sig = getattr(self, "_active_tune_signature", None)
-                if sig is not None:
-                    profile["tune_signature"] = sig
-            self._profiles.set(ck, profile)
+        profile["updated_at"] = datetime.now(UTC).isoformat()
+        # Profile IDs are stable engine signatures. Storing the key itself
+        # prevents delayed saves from writing a newer live signature into an
+        # older slot (the mismatch seen in the supplied 13.2.6 profile).
+        profile["tune_signature"] = ck[3]
+        if not self._profiles.set(ck, profile):
+            return False
+        self._profile_save_milestones[ck] = self._learning_milestone(ck)
+        return True
+
+    def _learning_milestone(self, ck: tuple) -> tuple[int, bool, bool]:
+        return (
+            len(self._calibrator.get_ratios(ck)),
+            self._power_curve.has_data(ck),
+            self._rev_limiter.is_verified(ck),
+        )
+
+    def _maybe_persist_learning(self, ck: tuple) -> None:
+        """Save immediately when a new gear/component becomes learned."""
+        if ck != self._current_car_key or not self._calibrator.has_data(ck):
+            return
+        milestone = self._learning_milestone(ck)
+        if milestone != self._profile_save_milestones.get(ck):
+            self.save_profiles()
 
     def _sync_profile_tune_id(self, td: Telemetry) -> None:
-        """Bind telemetry to the active per-tune profile slot for this car."""
+        """Bind telemetry to a stable engine-signature profile slot."""
         base = car_key_base(td)
         if base[0] <= 0:
             return
+        signature = td.tune_signature
         if base not in self._tune_id_by_base:
-            self._tune_id_by_base[base] = td.tune_signature
+            self._tune_id_by_base[base] = signature
+        elif self._tune_id_by_base[base] != signature:
+            candidate, frames = self._tune_signature_candidate_by_base.get(base, (signature, 0))
+            if candidate != signature:
+                candidate, frames = signature, 0
+            frames += 1
+            self._tune_signature_candidate_by_base[base] = (candidate, frames)
+            if frames >= self.TUNE_SIGNATURE_STABLE_FRAMES:
+                self._tune_id_by_base[base] = signature
+                self._tune_signature_candidate_by_base.pop(base, None)
+        else:
+            self._tune_signature_candidate_by_base.pop(base, None)
         td.profile_tune_id = self._tune_id_by_base[base]
-        self._active_tune_signature = td.tune_signature
 
     def _clear_learning_for_key(self, ck: tuple) -> None:
         self._calibrator._ratios.pop(ck, None)
@@ -184,10 +225,14 @@ class TCULogic:
         self._rev_limiter._peak_hold.pop(ck, None)
         self._rev_limiter._active_gear.pop(ck, None)
         self._rev_limiter._candidate.pop(ck, None)
+        self._rev_limiter._episode_peak.pop(ck, None)
+        self._rev_limiter._observations.pop(ck, None)
         self._rev_limiter._verified.discard(ck)
         self._profile_baseline_gear1.pop(ck, None)
         self._upshift_cap_by_key.pop(ck, None)
         self._upshift_cap_set_at.pop(ck, None)
+        self._upshift_fail_count.pop(ck, None)
+        self._profile_save_milestones.pop(ck, None)
 
     def _resolve_pending_upshift(self, td: Telemetry, now: float) -> None:
         """Clear or cap upshift targets once the game confirms or rejects a shift.
@@ -211,31 +256,43 @@ class TCULogic:
                 ck = td.car_key
                 self._upshift_cap_by_key[ck] = 10
                 self._upshift_cap_set_at.pop(ck, None)
+                self._upshift_fail_count.pop(ck, None)
             return
         if now >= self._pending_upshift_until:
+            # One missed acknowledgement is never proof of a top gear — a lost
+            # keypress, a slow ack, or a telemetry gap looks identical. Cap
+            # softly and retry with exponential backoff; a true top gear
+            # converges to one probe per max-backoff instead of a permanent
+            # lockout (which broke valid 7-10 speed transmissions).
             ck = td.car_key
             if ck[0] > 0 and 1 <= td.gear <= 10:
                 self._upshift_cap_by_key[ck] = min(self._upshift_cap_by_key.get(ck, 10), td.gear)
-                if td.gear < Cfg.UPSHIFT_CAP_HARD_FROM_GEAR:
-                    self._upshift_cap_set_at[ck] = now
-                else:
-                    self._upshift_cap_set_at.pop(ck, None)
+                self._upshift_cap_set_at[ck] = now
+                self._upshift_fail_count[ck] = self._upshift_fail_count.get(ck, 0) + 1
             self._pending_upshift_from = None
             self._pending_upshift_until = 0.0
             self._we_shifted = False
 
+    def _upshift_retry_backoff_s(self, ck: tuple) -> float:
+        fails = self._upshift_fail_count.get(ck, 1)
+        backoff = Cfg.UPSHIFT_CAP_RETRY_S * (2 ** max(fails - 1, 0))
+        return min(backoff, Cfg.UPSHIFT_CAP_MAX_BACKOFF_S)
+
     def _maybe_retry_upshift_cap(self, td: Telemetry, now: float) -> None:
-        """Clear a soft low-gear upshift cap when the car is still demanding power."""
+        """Clear a soft upshift cap when the car is still demanding power.
+
+        Every cap is soft: retries back off exponentially with the number of
+        consecutive failures, so a genuinely absent next gear costs at most one
+        keypress per :data:`Cfg.UPSHIFT_CAP_MAX_BACKOFF_S` while a transient
+        output failure recovers on the next attempt."""
         ck = td.car_key
         if ck[0] <= 0:
             return
         cap = self._upshift_cap_by_key.get(ck, 10)
         if cap >= 10 or td.gear < cap:
             return
-        if td.gear >= Cfg.UPSHIFT_CAP_HARD_FROM_GEAR:
-            return
         set_at = self._upshift_cap_set_at.get(ck)
-        if set_at is None or (now - set_at) < Cfg.UPSHIFT_CAP_RETRY_S:
+        if set_at is None or (now - set_at) < self._upshift_retry_backoff_s(ck):
             return
         if td.rpm_pct < 0.78 or td.throttle < 0.35 or td.brake > 0.08:
             return
@@ -258,10 +315,10 @@ class TCULogic:
         if data is None:
             return
         stored_sig = data.get("tune_signature")
-        if stored_sig is not None and stored_sig != td.tune_signature:
+        if stored_sig is not None and stored_sig != ck[3]:
             print(
                 f"[Profiles] engine/drivetrain changed for {storage_key(ck)} "
-                f"(sig {stored_sig} -> {td.tune_signature}), not loading stale data"
+                f"(sig {stored_sig} -> {ck[3]}), not loading stale data"
             )
             return
         if "gear_ratios" in data:
@@ -277,25 +334,20 @@ class TCULogic:
             self._power_curve.load(ck, data["power_curve"])
         if "rev_limiter" in data:
             self._rev_limiter.load(ck, data["rev_limiter"])
+        self._profiles.mark_active(ck)
+        self._profile_save_milestones[ck] = self._learning_milestone(ck)
 
     def _split_tune_profile(self, td: Telemetry, reason: str) -> None:
-        """Allocate a new tune_id slot when saved gear ratios no longer match the car."""
-        base = car_key_base(td)
-        old_ck = self._current_car_key
-        if old_ck is not None:
-            self.save_profiles()
-        new_id = int(time.time())
-        self._tune_id_by_base[base] = new_id
-        td.profile_tune_id = new_id
-        new_ck = td.car_key
-        if old_ck is not None:
-            self._clear_learning_for_key(old_ck)
-        self._clear_learning_for_key(new_ck)
-        self._current_car_key = new_ck
-        print(
-            f"[Profiles] new tune slot {storage_key(new_ck)} ({reason})"
-            + (f", replaced {storage_key(old_ck)}" if old_ck else "")
-        )
+        """Invalidate the current signature slot when its gearing no longer matches."""
+        ck = self._current_car_key
+        if ck is None:
+            return
+        if self._profiles.has_profile(ck) and not self._profiles.delete(ck):
+            print(f"[Profiles] could not invalidate {storage_key(ck)} ({reason})")
+            return
+        self._clear_learning_for_key(ck)
+        self._profile_baseline_gear1.pop(ck, None)
+        print(f"[Profiles] relearning {storage_key(ck)} ({reason})")
 
     def _check_tune_ratio_drift(self, td: Telemetry) -> None:
         if not self._config.get("feat_per_car_profiles", True):
@@ -316,6 +368,18 @@ class TCULogic:
             return
         if abs(live - baseline) / baseline > RATIO_DRIFT_THRESHOLD:
             self._split_tune_profile(td, "gear ratio drift")
+
+    def relearn_current_profile(self) -> tuple[bool, str | None]:
+        """Delete persisted and in-memory learning for the active/last car."""
+        with self._data_lock:
+            ck = self._current_car_key or self._profiles.active_car_key
+            if ck is None or ck[0] <= 0:
+                return False, None
+            if self._profiles.has_profile(ck) and not self._profiles.delete(ck):
+                return False, storage_key(ck)
+            self._clear_learning_for_key(ck)
+            self._profile_baseline_gear1.pop(ck, None)
+            return True, storage_key(ck)
 
     def shutdown(self):
         self.save_profiles()
@@ -411,8 +475,25 @@ class TCULogic:
         with self._data_lock:
             return self._shift_count
 
+    def _profile_key_for_snapshot(self, td: Telemetry | None) -> tuple | None:
+        if td is not None:
+            base = car_key_base(td)
+            if base[0] > 0:
+                tune_id = self._tune_id_by_base.get(base, td.tune_signature)
+                return (*base, tune_id)
+        return self._current_car_key or self._profiles.active_car_key
+
+    def _persisted_power_curve_learned(self, ck: tuple | None) -> bool:
+        if ck is None:
+            return False
+        profile = self._profiles.get(ck)
+        return isinstance(profile, dict) and isinstance(profile.get("power_curve"), dict)
+
     def snapshot(self, td: Telemetry | None) -> dict:
         with self._data_lock:
+            profile_key = self._profile_key_for_snapshot(td)
+            profile_learned = self._profiles.is_learned(profile_key)
+            power_curve_learned = self._persisted_power_curve_learned(profile_key)
             if td is None:
                 return {
                     "gear": -1,
@@ -437,9 +518,9 @@ class TCULogic:
                     "shift_advice": "",
                     "peak_rpm": self._peak_rpm,
                     "peak_g": self._peak_g,
-                    "calibrated": False,
+                    "calibrated": profile_learned,
                     "log_status": self._logger.status,
-                    "power_curve_learned": False,
+                    "power_curve_learned": power_curve_learned,
                     "shift_history": [],
                     "session_stats": self._session_stats.snapshot(),
                     "watchdog_stuck": self._watchdog.check(),
@@ -478,8 +559,10 @@ class TCULogic:
                 "shift_advice": self._shift_advice,
                 "peak_rpm": self._peak_rpm,
                 "peak_g": self._peak_g,
-                "calibrated": self._calibrator.has_data(td.car_key),
-                "power_curve_learned": self._power_curve.has_data(td.car_key),
+                # Persisted status is authoritative so pause/background frames
+                # do not turn a previously learned car back into "LEARNING".
+                "calibrated": profile_learned,
+                "power_curve_learned": power_curve_learned,
                 "log_status": self._logger.status,
                 "shift_history": self._shift_history.snapshot(),
                 "session_stats": self._session_stats.snapshot(),
@@ -530,6 +613,7 @@ class TCULogic:
             self._slip_streak = 0
             self._pending_upshift_from = None
             self._pending_upshift_until = 0.0
+            self._upshift_fail_count.clear()
             self._last_hard_brake_time = 0.0
             self._brake_history.clear()
             self._throttle_history.clear()
@@ -562,8 +646,16 @@ class TCULogic:
             self._rpm_pct_history.clear()
             if td.gear > self._prev_gear:
                 self._upshift_cap_by_key[td.car_key] = 10
+                self._upshift_fail_count.pop(td.car_key, None)
                 self._pending_upshift_from = None
                 self._pending_upshift_until = 0.0
+            else:
+                # A downshift (manual or automatic) invalidates the evidence
+                # behind a suspected cap — restart the retry backoff so the
+                # next valid upshift is not blocked by stale failure state.
+                self._upshift_fail_count.pop(td.car_key, None)
+                if td.car_key in self._upshift_cap_set_at:
+                    self._upshift_cap_set_at[td.car_key] = now
             if not self._we_shifted:
                 airborne = self._config.get("feat_airtime_lock") and self._airtime.is_airborne
                 if td.brake < 0.30 and not airborne:
@@ -695,6 +787,7 @@ class TCULogic:
             self._load_profiles(ck, td)
 
         self._check_tune_ratio_drift(td)
+        self._maybe_persist_learning(ck)
         self._observe_high_gear_load_plateau(td, current_mode, now)
 
         if current_mode == Mode.MANUAL:
@@ -1155,10 +1248,32 @@ class TCULogic:
             return max(abs(td.slip_rl), abs(td.slip_rr))
         return max(abs(td.slip_fl), abs(td.slip_fr), abs(td.slip_rl), abs(td.slip_rr))
 
+    # A plateau claim needs a real, time-normalized window — the old
+    # 10/15-packet windows spanned ~0.18 s at 85 pps and classified normal
+    # 240-320 km/h acceleration (< ~4.5 km/h/s) as an unreachable ceiling.
+    PLATEAU_WINDOW_S = 1.4
+    PLATEAU_MIN_SPAN_S = 1.0
+    # Evidence is tiered by how close the plateau sits to the nominal ceiling:
+    # near the limiter (>= STRONG_PEAK) one confirmed window is enough, but a
+    # low plateau (e.g. an aero-limited 83% top of a gear, Ford GT replay)
+    # must stay pinned for an extra EXTENDED_HOLD_S before it may lower the
+    # WOT target — a brief speed pause at 81-84% is ordinary high-gear
+    # acceleration (13.2.6 logs) and must never shift.
+    PLATEAU_STRONG_PEAK_PCT = 0.86
+    PLATEAU_EXTENDED_HOLD_S = 1.5
+    PLATEAU_MAX_SPEED_GROWTH_KMH_S = 1.0
+    PLATEAU_MAX_RPM_GROWTH_PCT_S = 0.005
+    # A truly unreachable target pins RPM in place; a window with a dip and
+    # recovery is a transient (traction, grade), not a ceiling.
+    PLATEAU_MAX_RPM_SPAN = 0.025
+
     def _reset_load_plateau(self) -> None:
         self._load_plateau_key = None
         self._load_plateau_since = 0.0
         self._load_plateau_reached = False
+        self._load_plateau_peak = 0.0
+        self._load_plateau_pinned_since = 0.0
+        self._plateau_samples.clear()
 
     def _observe_high_gear_load_plateau(
         self,
@@ -1182,27 +1297,49 @@ class TCULogic:
             and td.brake <= 0.05
             and td.rpm_pct >= mid
             and self._driven_wheel_slip(td) <= 0.8
-            and len(self._rpm_pct_history) >= 10
-            and len(self._speed_history) >= 15
         )
-        if not valid_load:
+        if not valid_load or self._load_plateau_key != key:
             self._reset_load_plateau()
-            return
-
-        rpm = list(self._rpm_pct_history)[-10:]
-        speed = list(self._speed_history)[-15:]
-        rpm_growth = sum(rpm[-3:]) / 3 - sum(rpm[:3]) / 3
-        speed_growth = speed[-1] - speed[0]
-        if rpm_growth > 0.005 or speed_growth > 0.8:
-            self._reset_load_plateau()
-            return
-
-        if self._load_plateau_key != key:
+            if not valid_load:
+                return
             self._load_plateau_key = key
             self._load_plateau_since = now
+
+        self._plateau_samples.append((now, td.rpm_pct, td.speed_kmh))
+        while self._plateau_samples and now - self._plateau_samples[0][0] > self.PLATEAU_WINDOW_S:
+            self._plateau_samples.popleft()
+
+        span = now - self._plateau_samples[0][0]
+        if span < self.PLATEAU_MIN_SPAN_S:
             self._load_plateau_reached = False
             return
-        self._load_plateau_reached = now - self._load_plateau_since >= 1.0
+
+        _, first_rpm, first_speed = self._plateau_samples[0]
+        peak = max(sample[1] for sample in self._plateau_samples)
+        trough = min(sample[1] for sample in self._plateau_samples)
+        max_speed = max(sample[2] for sample in self._plateau_samples)
+        rpm_rate = (td.rpm_pct - first_rpm) / span
+        # Growth to the window *maximum*: a rise-then-settle inside the window
+        # still proves the car was accelerating and must veto the plateau.
+        speed_rate = (max_speed - first_speed) / span
+        pinned = (
+            peak - trough <= self.PLATEAU_MAX_RPM_SPAN
+            and rpm_rate <= self.PLATEAU_MAX_RPM_GROWTH_PCT_S
+            and speed_rate <= self.PLATEAU_MAX_SPEED_GROWTH_KMH_S
+        )
+        if not pinned:
+            self._load_plateau_pinned_since = 0.0
+            self._load_plateau_reached = False
+            return
+        if self._load_plateau_pinned_since == 0.0:
+            self._load_plateau_pinned_since = now
+        self._load_plateau_peak = peak
+        if peak >= self.PLATEAU_STRONG_PEAK_PCT:
+            self._load_plateau_reached = True
+        else:
+            self._load_plateau_reached = (
+                now - self._load_plateau_pinned_since >= self.PLATEAU_EXTENDED_HOLD_S
+            )
 
     def _trusted_rev_limiter_pct(self, td: Telemetry) -> float | None:
         nominal = td.engine_max_rpm
@@ -1285,9 +1422,11 @@ class TCULogic:
         ceiling_pct = self._upshift_ceiling_pct(td, wot)
         if ceiling_pct is not None:
             return min(wot, max(mid, ceiling_pct - 0.01))
-        if high_gear_plateau:
-            observed_peak = max(list(self._rpm_pct_history)[-10:])
-            return min(wot, max(mid, observed_peak - 0.01))
+        if high_gear_plateau and self._load_plateau_peak > 0.0:
+            # The plateau may only shave the target down toward its own
+            # confirmed peak — never to the mid threshold on the strength
+            # of a road-speed pause alone.
+            return min(wot, max(mid, self._load_plateau_peak - 0.01))
         return wot
 
     def _effective_upshift_pct(
@@ -1674,6 +1813,47 @@ class TCULogic:
         self._no_upshift_until = now + 0.3
         return True
 
+    DESCENT_WINDOW_S = 1.0
+    DESCENT_MIN_SPAN_S = 0.8
+    DESCENT_MIN_SPEED_GAIN_KMH_S = 2.0
+    DESCENT_MAX_RPM_PCT = 0.55
+
+    def _track_descent_downshift(self, td: Telemetry, now: float) -> bool:
+        """Race/Offroad engine-braking recovery on a sustained descent.
+
+        The coast path requires zero pedals *and* RPM below the coast floor
+        (~30%), but gravity normally keeps downhill RPM above that and light
+        maintenance throttle/brake disables it entirely — leaving no Race
+        branch that ever selects a descent gear. Detect the descent from a
+        time-normalized window of low driver demand plus clearly increasing
+        speed and step down one gear at a time; the exact-target over-rev
+        guard inside :meth:`_shift_down` still applies."""
+        if not self._config.get("feat_engine_brake"):
+            self._descent_samples.clear()
+            return False
+        if td.gear <= 2 or td.speed_kmh < 40.0 or td.throttle > 0.15 or td.brake > 0.15:
+            self._descent_samples.clear()
+            return False
+
+        self._descent_samples.append((now, td.speed_kmh))
+        while self._descent_samples and now - self._descent_samples[0][0] > self.DESCENT_WINDOW_S:
+            self._descent_samples.popleft()
+        first_t, first_speed = self._descent_samples[0]
+        span = now - first_t
+        if span < self.DESCENT_MIN_SPAN_S:
+            return False
+        if (td.speed_kmh - first_speed) / span < self.DESCENT_MIN_SPEED_GAIN_KMH_S:
+            return False
+        if td.rpm_pct >= self.DESCENT_MAX_RPM_PCT:
+            # Already turning fast enough for meaningful engine braking.
+            return False
+        if self._downshift_would_hunt(td, td.gear - 1):
+            return False
+        if not self._shift_down(td, 450, "ENGINE BRAKE", "descent"):
+            return False
+        self._no_upshift_until = now + 1.0
+        return True
+
     def _is_spinning_not_traction(self, td: Telemetry) -> bool:
         if td.rear_slip < 1.2:
             return False
@@ -1848,6 +2028,9 @@ class TCULogic:
         if self._track_coast_downshift(td, now, coast_rpm):
             return
 
+        if self._track_descent_downshift(td, now):
+            return
+
         if (
             self._wheelspin_upshift_now(td)
             and td.speed_kmh > 15.0
@@ -1938,6 +2121,9 @@ class TCULogic:
 
         coast_rpm = self._config.get("offroad_coast_rpm", 32) / 100
         if self._track_coast_downshift(td, now, coast_rpm):
+            return
+
+        if self._track_descent_downshift(td, now):
             return
 
         if self._track_out_of_band_kickdown(td, now):

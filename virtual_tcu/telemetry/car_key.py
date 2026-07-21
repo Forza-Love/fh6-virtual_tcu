@@ -11,7 +11,8 @@ if TYPE_CHECKING:
 CarKey = tuple[int, int, int, int]
 CarKeyBase = tuple[int, int, int]
 
-# Relative change in learned vs saved gear-1 ratio → new tune slot.
+# Relative change in learned vs saved gear-1 ratio → invalidate and relearn the
+# current signature slot. Gearing is not part of the engine fingerprint.
 RATIO_DRIFT_THRESHOLD = 0.22
 MIN_GEAR1_SAMPLES_FOR_DRIFT = 30
 

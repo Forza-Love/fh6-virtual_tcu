@@ -1,5 +1,21 @@
 # Changelog
 
+## [13.2.7] - 2026-07-21
+
+### Fixed
+
+- **High-gear permanent lockout** — remove the sixth-gear hard upshift cap; a missed acknowledgement now soft-caps with exponential backoff (capped) so 7–10 speed transmissions can recover, and a downshift clears stale cap state.
+- **Cross-gear limiter trust** — bank independent fuel-cut candidate episodes and verify the limiter across gears, so later gears reuse the first clean discovery instead of re-paying the fuel-cut cost after each live-candidate shift.
+- **False high-gear load plateaus** — require time-normalized RPM/speed evidence and stronger near-limiter proof before lowering a WOT target; ordinary 81–84% high-speed acceleration no longer triggers early 8→9 / 9→10 shifts.
+- **Race/Offroad descent recovery** — add sustained low-demand speed-gain engine-brake downshifts that work above the old 30% coast floor, with crest/unweighted holds bounded so a long downhill grade cannot freeze shifting indefinitely.
+- **Profile persistence lifecycle** — wrap `tcu_profiles.json` in a versioned envelope (`PROFILE_SCHEMA_VERSION = 1`, independent of the app version), archive incompatible/legacy files, stabilize engine-signature switches, and persist learning milestones atomically.
+- **Calibration UX** — add a confirmed **Relearn** action for the current car profile, keep Settings reset behind a confirmation dialog, and broadcast config/profile updates to all clients.
+- **Replay regressions** — cover clean-profile 13.2.6 logs, soft-cap retry/backoff, cross-gear limiter confirmation, sustained unweighted grades, and descent downshifts.
+
+### Changed
+
+- **Legacy profile files** — unversioned flat `tcu_profiles.json` from earlier builds is archived and replaced with the new envelope; cars relearn once after upgrading to 13.2.7. Ordinary future app releases keep the same schema and retain learning.
+
 ## [13.2.6] - 2026-07-20
 
 ### Fixed
@@ -233,6 +249,22 @@
 ---
 
 # 更新日志
+
+## [13.2.7] - 2026-07-21
+
+### 修复
+
+- **高挡永久锁死** — 取消「六挡起硬封顶」假设；漏确认改为带上限的指数退避软封顶，使 7–10 速变速箱可恢复升挡，降挡会清除过期封顶状态。
+- **跨挡断油红线信任** — 将各次独立断油候选记入证据库并跨挡确认，后续挡位复用首次可靠发现，不再因每次实时候选升挡后重置而反复撞断油。
+- **高挡误判负载平台** — 要求按时间归一化的转速/车速证据，并在接近红线时才允许下调 WOT 目标；普通 81–84% 高速加速不再触发过早的 8→9 / 9→10。
+- **Race/Offroad 下坡恢复** — 在低油门/轻刹车且车速持续增加时进行发动机制动降挡（可高于旧的 30% 滑行门槛）；坡顶卸载保持有连续时长上限，长下坡不会无限冻结换挡。
+- **配置学习生命周期** — `tcu_profiles.json` 使用与应用版本无关的信封版本（`PROFILE_SCHEMA_VERSION = 1`），不兼容/旧格式归档备份，稳定发动机指纹切换，并在学习里程碑到达时原子写入。
+- **标定交互** — 为当前车辆增加需确认的「重新学习」；设置重置改为确认对话框；配置/配置文件变更向所有客户端广播。
+- **回放回归** — 覆盖 13.2.6 洁净 profile 日志、软封顶重试/退避、跨挡红线确认、持续卸载坡道与下坡降挡路径。
+
+### 变更
+
+- **旧版配置文件** — 早期无版本扁平 `tcu_profiles.json` 会归档并替换为新信封；升级到 13.2.7 后车辆需重新学习一次。之后普通应用发版在 schema 不变时保留已学习数据。
 
 ## [13.2.6] - 2026-07-20
 
