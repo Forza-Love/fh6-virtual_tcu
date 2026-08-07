@@ -105,6 +105,33 @@ def test_a_ceiling_that_keeps_rising_is_not_treated_as_coverage():
     assert det.observed_ceiling_pct(CAR_KEY) is None
 
 
+def test_small_max_r_step_does_not_inherit_prior_ceiling_hits():
+    """A creep inside CEILING_BAND must not keep the old hit tally.
+
+    Coverage is "repeated revisits at this peak". If max_r edges up by less
+    than the band and the previous count is retained, the new peak is granted
+    immediately without those revisits.
+    """
+    det = PowerCurveDetector()
+    _feed_curve(det, top_r=0.82)
+    assert det.observed_ceiling_pct(CAR_KEY) == pytest.approx(0.82)
+
+    step = 0.82 + PowerCurveDetector.CEILING_BAND * 0.5
+    det.observe(
+        make_telemetry(
+            gear=4,
+            current_rpm=step * _MAX_RPM,
+            engine_max_rpm=_MAX_RPM,
+            torque_nm=_torque(step),
+            accel_raw=255,
+        )
+    )
+
+    assert det._max_r[CAR_KEY] == pytest.approx(step)
+    assert det.observed_ceiling_pct(CAR_KEY) is None
+    assert det._ceiling_hits[CAR_KEY] == pytest.approx(1.0)
+
+
 def test_curve_may_lower_the_target_but_not_past_the_reduction_bound(make_logic):
     tcu = make_logic("RACE")
     _feed_curve(tcu._power_curve, top_r=0.92)

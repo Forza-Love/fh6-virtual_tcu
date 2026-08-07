@@ -143,10 +143,10 @@ class PowerCurveDetector:
         prev_max = self._max_r.get(ck, 0.0)
         if r > prev_max:
             self._max_r[ck] = r
-            if r > prev_max + self.CEILING_BAND:
-                # A genuinely higher top means the previous "ceiling" was not
-                # one — the evidence collected against it is void.
-                self._ceiling_hits[ck] = 0.0
+            # Any new high voids prior ceiling evidence — including a creep
+            # inside CEILING_BAND. Keeping the old hit tally would grant the
+            # new peak coverage without the required revisits at that RPM.
+            self._ceiling_hits[ck] = 0.0
         # Partial throttle and some slip still carry curve-shape info but
         # weigh less — the least-squares fit absorbs them as soft evidence.
         weight = 1.0
