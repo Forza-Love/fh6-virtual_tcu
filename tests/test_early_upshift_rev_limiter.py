@@ -210,6 +210,7 @@ def test_rev_limiter_learns_verified_low_nominal_sawtooth():
     assert det.dump(td.car_key) == {
         "rpm": nominal * 0.844,
         "version": RevLimiterDetector.SERIAL_VERSION,
+        "max_wot_rpm": nominal * 0.844,
     }
 
 

@@ -1,6 +1,6 @@
 [project]
 name = "virtual-tcu"
-version = "13.2.7"
+version = "13.2.8"
 requires-python = ">=3.12"
 dependencies = [
     "keyboard>=0.13.5",
