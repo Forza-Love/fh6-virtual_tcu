@@ -83,6 +83,9 @@ class TCULogic:
         self._load_plateau_peak = 0.0
         self._load_plateau_pinned_since = 0.0
         self._plateau_samples: deque[tuple[float, float, float]] = deque()
+        self._gear_stall_key: tuple[tuple, int, str] | None = None
+        self._gear_stall_samples: deque[tuple[float, float]] = deque()
+        self._gear_stall_pct = 0.0
         self._descent_samples: deque[tuple[float, float]] = deque()
         self._brake_raw_history = deque(maxlen=10)
         self._throttle_raw_history = deque(maxlen=10)
@@ -220,6 +223,7 @@ class TCULogic:
         self._calibrator._counts.pop(ck, None)
         self._power_curve._fits.pop(ck, None)
         self._power_curve._max_r.pop(ck, None)
+        self._power_curve._ceiling_hits.pop(ck, None)
         self._rev_limiter._redline.pop(ck, None)
         self._rev_limiter._rpm_window.pop(ck, None)
         self._rev_limiter._peak_hold.pop(ck, None)
@@ -227,6 +231,7 @@ class TCULogic:
         self._rev_limiter._candidate.pop(ck, None)
         self._rev_limiter._episode_peak.pop(ck, None)
         self._rev_limiter._observations.pop(ck, None)
+        self._rev_limiter._max_wot_rpm.pop(ck, None)
         self._rev_limiter._verified.discard(ck)
         self._profile_baseline_gear1.pop(ck, None)
         self._upshift_cap_by_key.pop(ck, None)
@@ -334,6 +339,8 @@ class TCULogic:
             self._power_curve.load(ck, data["power_curve"])
         if "rev_limiter" in data:
             self._rev_limiter.load(ck, data["rev_limiter"])
+            observed = self._power_curve._max_r.get(ck, 0.0) * td.engine_max_rpm
+            self._rev_limiter.reconcile_with_observed(ck, observed)
         self._profiles.mark_active(ck)
         self._profile_save_milestones[ck] = self._learning_milestone(ck)
 
@@ -620,6 +627,7 @@ class TCULogic:
             self._speed_history.clear()
             self._rpm_pct_history.clear()
             self._reset_load_plateau()
+            self._reset_gear_stall()
             self._brake_raw_history.clear()
             self._throttle_raw_history.clear()
             self._tcu_state = "RESUMING"
@@ -789,6 +797,7 @@ class TCULogic:
         self._check_tune_ratio_drift(td)
         self._maybe_persist_learning(ck)
         self._observe_high_gear_load_plateau(td, current_mode, now)
+        self._observe_gear_stall(td, current_mode, now)
 
         if current_mode == Mode.MANUAL:
             self._tcu_state = "MANUAL"
@@ -871,7 +880,13 @@ class TCULogic:
 
         Shift timing and power-curve learning always use the game's nominal
         ``engine_max_rpm``. A learned fuel-cut RPM is applied here only when
-        it is plausibly at the real limiter (not a TCU upshift plateau)."""
+        it is plausibly at the real limiter (not a TCU upshift plateau).
+
+        The power curve's observed ceiling is deliberately *not* accepted here:
+        it is a lower bound on the reachable RPM, not a measurement of the cut,
+        and treating a lower bound as the ceiling blocks legitimate brake
+        downshifts (跳一档 replay: landings at 92-98% rejected against a 91.3%
+        observed ceiling that later grew to 98.4%)."""
         nominal = td.engine_max_rpm
         if nominal <= 0:
             return nominal
@@ -1113,14 +1128,7 @@ class TCULogic:
     def _wheelspin_upshift_now(self, td: Telemetry) -> bool:
         if not self._config.get("feat_drivetrain_aware"):
             return False
-        if (
-            self._config.get("feat_power_curve")
-            and self._power_curve.confidence(td.car_key) < 0.25
-            and td.drivetrain == 1
-        ):
-            # RWD wheelspin upshifts are a traction aid, not a shift-point
-            # signal — skip while the per-car curve is still cold. FWD/AWD may
-            # still need a launch upshift when in-band RPM cannot reach WOT.
+        if td.drivetrain == 1 and self._rwd_wheelspin_upshift_premature(td):
             self._slip_streak = 0
             return False
         if td.gear < 2 or td.gear > 3:
@@ -1141,6 +1149,22 @@ class TCULogic:
         else:
             self._slip_streak = 0
             return False
+
+    def _rwd_wheelspin_upshift_premature(self, td: Telemetry) -> bool:
+        """Whether a RWD traction-save upshift still lacks the evidence to judge it.
+
+        On RWD a wheelspin upshift is a traction aid, not a shift-point signal,
+        so it must not fire until the landing RPM can actually be checked
+        against the power floor — an uncalibrated target gear makes
+        :meth:`_race_wheelspin_landing_allowed` pass vacuously. FWD/AWD may
+        still need a ratio-less launch upshift when in-band RPM cannot reach
+        WOT.
+        """
+        if self._calibrator.project_rpm_after_shift(td, td.gear + 1) is None:
+            return True
+        if not self._config.get("feat_power_curve"):
+            return False
+        return self._power_curve.confidence(td.car_key) < 0.25
 
     def _race_wheelspin_landing_allowed(
         self,
@@ -1266,6 +1290,25 @@ class TCULogic:
     # A truly unreachable target pins RPM in place; a window with a dip and
     # recovery is a transient (traction, grade), not a ceiling.
     PLATEAU_MAX_RPM_SPAN = 0.025
+    # How far below the configured/reachable fallback the learned power curve
+    # may move the WOT upshift point.
+    MAX_CURVE_REDUCTION = 0.06
+    # A gear can be aero-limited without ever pinning RPM the way the plateau
+    # detector requires: the Ford GT crawls up 4th at 0.6%/s while still
+    # gaining 2.2 km/h/s, so it needs ~10 s to reach a target it never reaches
+    # before the next corner. That is not a plateau, it is a gear that is done.
+    # Distinguishing it from an ordinary long high-gear pull (STO logs, which
+    # do reach their target) takes a much longer window plus proof that the
+    # engine is already past peak power.
+    GEAR_STALL_WINDOW_S = 3.0
+    GEAR_STALL_MIN_SPAN_S = 2.5
+    GEAR_STALL_MAX_RPM_SPAN = 0.02
+    GEAR_STALL_MIN_ETA_S = 6.0
+
+    def _reset_gear_stall(self) -> None:
+        self._gear_stall_key = None
+        self._gear_stall_samples.clear()
+        self._gear_stall_pct = 0.0
 
     def _reset_load_plateau(self) -> None:
         self._load_plateau_key = None
@@ -1341,6 +1384,63 @@ class TCULogic:
                 now - self._load_plateau_pinned_since >= self.PLATEAU_EXTENDED_HOLD_S
             )
 
+    def _observe_gear_stall(self, td: Telemetry, mode: Mode, now: float) -> None:
+        """Detect a gear that can no longer reach its WOT upshift target.
+
+        Unlike the load plateau this tolerates slow but real acceleration — the
+        question is not "has the car stopped" but "will this gear ever get
+        there". It only arms past peak power, so a gear that is still pulling
+        through its power band is never cut short.
+        """
+        bounds = self._upshift_band_bounds(mode)
+        if bounds is None or td.gear < 3:
+            self._reset_gear_stall()
+            return
+        peak_power = self._power_curve.peak_power_rpm(td.car_key)
+        valid = (
+            not td.is_shifting
+            and td.throttle >= 0.85
+            and td.brake <= 0.05
+            and self._driven_wheel_slip(td) <= 0.8
+            and peak_power is not None
+            and td.rpm_pct >= peak_power
+        )
+        key = (td.car_key, td.gear, mode.value)
+        if not valid or self._gear_stall_key != key:
+            self._reset_gear_stall()
+            if not valid:
+                return
+            self._gear_stall_key = key
+
+        self._gear_stall_samples.append((now, td.rpm_pct))
+        while (
+            self._gear_stall_samples
+            and now - self._gear_stall_samples[0][0] > self.GEAR_STALL_WINDOW_S
+        ):
+            self._gear_stall_samples.popleft()
+
+        span = now - self._gear_stall_samples[0][0]
+        if span < self.GEAR_STALL_MIN_SPAN_S:
+            self._gear_stall_pct = 0.0
+            return
+
+        rpms = [sample[1] for sample in self._gear_stall_samples]
+        if max(rpms) - min(rpms) > self.GEAR_STALL_MAX_RPM_SPAN:
+            self._gear_stall_pct = 0.0
+            return
+
+        target = self._wot_upshift_fallback_base(td, mode)
+        gap = target - td.rpm_pct
+        if gap <= 0:
+            self._gear_stall_pct = 0.0
+            return
+        rate = (td.rpm_pct - self._gear_stall_samples[0][1]) / span
+        eta = gap / rate if rate > 1e-5 else float("inf")
+        if eta < self.GEAR_STALL_MIN_ETA_S:
+            self._gear_stall_pct = 0.0
+            return
+        self._gear_stall_pct = max(rpms)
+
     def _trusted_rev_limiter_pct(self, td: Telemetry) -> float | None:
         nominal = td.engine_max_rpm
         learned = self._rev_limiter.effective_redline(td)
@@ -1403,31 +1503,69 @@ class TCULogic:
             return peak
         return None
 
-    def _wot_upshift_fallback(self, td: Telemetry, *, mode: Mode | None = None) -> float:
-        """WOT upshift RPM fraction for in-band timing and shift advisor."""
-        m = mode if mode is not None else self.mode
-        if m == Mode.OFFROAD:
-            wot = self._config.get("offroad_up_wot", 90) / 100
-            mid = self._config.get("offroad_up_mid", 72) / 100
-        elif m == Mode.RACE:
-            wot = self._config.get("race_up_wot", 94) / 100
-            mid = self._config.get("race_up_mid", 80) / 100
-        else:
+    def _upshift_band_bounds(self, mode: Mode) -> tuple[float, float] | None:
+        """(wot, mid) upshift fractions for the modes that have a band."""
+        if mode == Mode.OFFROAD:
+            return (
+                self._config.get("offroad_up_wot", 90) / 100,
+                self._config.get("offroad_up_mid", 72) / 100,
+            )
+        if mode == Mode.RACE:
+            return (
+                self._config.get("race_up_wot", 94) / 100,
+                self._config.get("race_up_mid", 80) / 100,
+            )
+        return None
+
+    def _wot_upshift_fallback_base(self, td: Telemetry, mode: Mode) -> float:
+        """WOT upshift fraction from the configured, limiter and plateau evidence."""
+        bounds = self._upshift_band_bounds(mode)
+        if bounds is None:
             return self._config.get("comfort_up_wot", 82) / 100
+        wot, mid = bounds
         high_gear_plateau = self._load_plateau_reached and self._load_plateau_key == (
             td.car_key,
             td.gear,
-            m.value,
+            mode.value,
         )
         ceiling_pct = self._upshift_ceiling_pct(td, wot)
         if ceiling_pct is not None:
+            # A measured fuel cut wins outright: the engine physically cannot
+            # go further, wherever the curve puts peak power.
             return min(wot, max(mid, ceiling_pct - 0.01))
         if high_gear_plateau and self._load_plateau_peak > 0.0:
             # The plateau may only shave the target down toward its own
             # confirmed peak — never to the mid threshold on the strength
             # of a road-speed pause alone.
-            return min(wot, max(mid, self._load_plateau_peak - 0.01))
+            return min(wot, max(self._wall_evidence_floor(td, mid), self._load_plateau_peak - 0.01))
         return wot
+
+    def _wall_evidence_floor(self, td: Telemetry, mid: float) -> float:
+        """Lowest target that road-speed-wall evidence alone may justify.
+
+        A car that stops accelerating below peak power is still pulling — only
+        a measured rev ceiling may place the shift point there.
+        """
+        return max(mid, self._power_curve.peak_power_rpm(td.car_key) or 0.0)
+
+    def _wot_upshift_fallback(self, td: Telemetry, *, mode: Mode | None = None) -> float:
+        """WOT upshift RPM fraction for in-band timing and shift advisor."""
+        m = mode if mode is not None else self.mode
+        base = self._wot_upshift_fallback_base(td, m)
+        bounds = self._upshift_band_bounds(m)
+        if bounds is None:
+            return base
+        stalled = self._gear_stall_pct > 0.0 and self._gear_stall_key == (
+            td.car_key,
+            td.gear,
+            m.value,
+        )
+        if stalled:
+            # The stall was armed against the peak-power estimate of the time;
+            # that estimate keeps moving, so re-apply it as a floor.
+            floor = self._wall_evidence_floor(td, bounds[1])
+            return min(base, max(floor, self._gear_stall_pct))
+        return base
 
     def _effective_upshift_pct(
         self,
@@ -1436,14 +1574,25 @@ class TCULogic:
         *,
         mode: Mode | None = None,
     ) -> float:
-        """Bound the learned shift point by the configured/reachable fallback."""
-        fallback = self._wot_upshift_fallback(td, mode=mode)
+        """Bound the learned shift point by the configured/reachable fallback.
+
+        The curve may pull the target down toward peak power but never past
+        MAX_CURVE_REDUCTION below the fallback, and never below the mode's mid
+        threshold — a bad fit must not be able to drop the car out of its
+        power band.
+        """
+        m = mode if mode is not None else self.mode
+        fallback = self._wot_upshift_fallback(td, mode=m)
         learned = self._power_curve.optimal_upshift_rpm(
             td,
             fallback=fallback,
             offset=offset,
         )
-        return min(learned, fallback)
+        bounds = self._upshift_band_bounds(m)
+        if bounds is None:
+            return min(learned, fallback)
+        floor = max(bounds[1], fallback - self.MAX_CURVE_REDUCTION)
+        return min(fallback, max(floor, learned))
 
     def _anti_hunt_upshift_pct(self, td: Telemetry) -> float:
         """Return the effective upshift point used to guard a downshift."""

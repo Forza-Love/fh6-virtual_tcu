@@ -53,6 +53,10 @@ def _replay_upshifts(log_path: Path, monkeypatch, tmp_path) -> list[dict]:
                     "rpm_pct": td.rpm_pct,
                     "state": tcu._tcu_state,
                     "limiter_verified": tcu._rev_limiter.is_verified(td.car_key),
+                    "ceiling_known": (
+                        tcu._rev_limiter.is_verified(td.car_key)
+                        or tcu._power_curve.observed_ceiling_pct(td.car_key) is not None
+                    ),
                 }
             )
         record(from_gear, target_gear)
@@ -81,13 +85,20 @@ def test_no_low_plateau_upshift_in_high_gears(log_path, monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("log_path", LOGS, ids=lambda p: p.name)
 @pytest.mark.skipif(not LOGS, reason="13.2.6 clean-profile logs not in logs/")
-def test_limiter_trust_matures_during_the_pull(log_path, monkeypatch, tmp_path):
-    """Replaying the logs must not leave every command with an untrusted
-    limiter throughout the entire pull (cross-gear evidence accumulation)."""
+def test_rev_ceiling_knowledge_matures_during_the_pull(log_path, monkeypatch, tmp_path):
+    """The car must learn where the top of its usable rev range is.
+
+    Originally this asserted that the fuel-cut detector verifies during the
+    pull. Since #74 the power curve moves the shift point below the limiter, so
+    a well-behaved run may never bounce off fuel cut again and the detector has
+    nothing to see. The underlying criterion still has to hold: by the end of
+    the pull the TCU has characterised the top of the range from one source or
+    the other, which is what unblocks power-curve shift timing.
+    """
     ups = _replay_upshifts(log_path, monkeypatch, tmp_path)
     assert ups, "expected automatic upshifts in the replay"
-    assert any(u["limiter_verified"] for u in ups), (
-        f"limiter never verified across {len(ups)} upshifts"
+    assert any(u["ceiling_known"] for u in ups), (
+        f"no rev ceiling learned across {len(ups)} upshifts"
     )
 
 
@@ -95,11 +106,11 @@ def test_limiter_trust_matures_during_the_pull(log_path, monkeypatch, tmp_path):
 @pytest.mark.skipif(not LOGS, reason="13.2.6 clean-profile logs not in logs/")
 def test_same_gear_shift_points_are_consistent(log_path, monkeypatch, tmp_path):
     """Comparable pulls of the same car/gear must stay within ~2 percentage
-    points once the limiter is verified."""
+    points once the rev ceiling is known."""
     ups = _replay_upshifts(log_path, monkeypatch, tmp_path)
     by_gear: dict[int, list[float]] = defaultdict(list)
     for u in ups:
-        if u["limiter_verified"] and u["state"] == "UPSHIFT":
+        if u["ceiling_known"] and u["state"] == "UPSHIFT":
             by_gear[u["from"]].append(u["rpm_pct"])
     for gear, pcts in by_gear.items():
         if len(pcts) < 2:

@@ -50,6 +50,13 @@ class RevLimiterDetector:
     # changes) must not restart the stability count — only a *rising* peak
     # means the engine is still climbing.
     PEAK_DRIFT_DOWN_EPS = 120.0
+    # Fuel cut cannot sit below an RPM the engine has demonstrably run at.
+    # Traction and turbo oscillation in a low gear can imitate the sawtooth
+    # (issue #74: a Huayra R was pinned to 9,765 rpm after having already
+    # revved to 11,524), and once such a value is verified it drags the shift
+    # point down for good. The highest WOT RPM ever seen is the hard floor
+    # every candidate has to clear.
+    MAX_SEEN_TOLERANCE = 0.99
 
     def __init__(self):
         self._redline: dict[tuple, float] = {}
@@ -60,6 +67,7 @@ class RevLimiterDetector:
         self._candidate: dict[tuple, float] = {}
         self._episode_peak: dict[tuple, float] = {}
         self._observations: dict[tuple, list[float]] = {}
+        self._max_wot_rpm: dict[tuple, float] = {}
 
     def _reset(self, car: tuple):
         self._bank_episode(car)
@@ -78,6 +86,21 @@ class RevLimiterDetector:
             del obs[: len(obs) - self.MAX_BANKED_OBSERVATIONS]
         self._try_cross_gear_confirm(car)
 
+    def _is_plausible(self, car: tuple, rpm: float) -> bool:
+        """Whether *rpm* can be the fuel cut given how high the engine has run."""
+        return rpm >= self._max_wot_rpm.get(car, 0.0) * self.MAX_SEEN_TOLERANCE
+
+    def _drop_implausible_redline(self, car: tuple):
+        """Forget a stored limiter the engine has since revved past."""
+        stored = self._redline.get(car)
+        if stored is None or self._is_plausible(car, stored):
+            return
+        self._redline.pop(car, None)
+        self._verified.discard(car)
+        self._observations.pop(car, None)
+        self._episode_peak.pop(car, None)
+        self._candidate.pop(car, None)
+
     def _try_cross_gear_confirm(self, car: tuple):
         if car in self._verified:
             return
@@ -85,6 +108,8 @@ class RevLimiterDetector:
         if len(obs) < self.CROSS_GEAR_CONFIRMS:
             return
         best = max(obs)
+        if not self._is_plausible(car, best):
+            return
         eps = best * self.CROSS_GEAR_EPS_FRAC
         agreeing = [p for p in obs if best - p <= eps]
         if len(agreeing) >= self.CROSS_GEAR_CONFIRMS:
@@ -121,6 +146,9 @@ class RevLimiterDetector:
             # limiter — exclude it, same as the gear-ratio calibrator.
             self._reset(car)
             return
+
+        self._max_wot_rpm[car] = max(self._max_wot_rpm.get(car, 0.0), td.current_rpm)
+        self._drop_implausible_redline(car)
 
         win = self._rpm_window.setdefault(car, deque(maxlen=self.WINDOW))
         win.append(td.current_rpm)
@@ -162,12 +190,16 @@ class RevLimiterDetector:
         self._peak_hold[car] = (anchor_peak, held_frames)
 
         if held_frames >= self.CANDIDATE_STABLE_FRAMES:
-            self._candidate[car] = max(anchor_peak, wmax)
-            self._episode_peak[car] = max(self._episode_peak.get(car, 0.0), anchor_peak, wmax)
+            peak = max(anchor_peak, wmax)
+            if self._is_plausible(car, peak):
+                self._candidate[car] = peak
+                self._episode_peak[car] = max(self._episode_peak.get(car, 0.0), peak)
 
         if held_frames >= self.STABLE_FRAMES:
             confirmed_peak = max(anchor_peak, wmax)
             if confirmed_peak < td.engine_max_rpm * self.MIN_COMMIT_NOMINAL_FRAC:
+                return
+            if not self._is_plausible(car, confirmed_peak):
                 return
             if car not in self._verified:
                 # A live confirmation supersedes an untrusted legacy value,
@@ -179,12 +211,28 @@ class RevLimiterDetector:
                 # a stray low reading can never drag the estimate down.
                 self._redline[car] = confirmed_peak
 
+    def reconcile_with_observed(self, car: tuple, observed_rpm: float):
+        """Fold an externally measured reachable RPM into the plausibility floor.
+
+        Profiles written before ``max_wot_rpm`` existed restore a limiter with
+        no evidence of how high the engine has actually run, so a value learned
+        from a traction sawtooth would survive the upgrade. The power curve
+        persists that evidence, so it is replayed here on load.
+        """
+        if observed_rpm <= 0:
+            return
+        self._max_wot_rpm[car] = max(self._max_wot_rpm.get(car, 0.0), observed_rpm)
+        self._drop_implausible_redline(car)
+
     def effective_redline(self, td: Telemetry) -> float | None:
         return self._redline.get(td.car_key)
 
     def candidate_redline(self, td: Telemetry) -> float | None:
         """Return a current-gear limiter candidate that is not yet persisted."""
-        return self._candidate.get(td.car_key)
+        candidate = self._candidate.get(td.car_key)
+        if candidate is None or not self._is_plausible(td.car_key, candidate):
+            return None
+        return candidate
 
     def is_verified(self, car: tuple) -> bool:
         return car in self._verified
@@ -195,7 +243,13 @@ class RevLimiterDetector:
         if redline is None:
             return None
         if car in self._verified:
-            return {"rpm": redline, "version": self.SERIAL_VERSION}
+            # max_wot_rpm is an additive key: older readers ignore it and older
+            # files simply restore without the plausibility floor.
+            return {
+                "rpm": redline,
+                "version": self.SERIAL_VERSION,
+                "max_wot_rpm": self._max_wot_rpm.get(car, 0.0),
+            }
         return redline
 
     def load(self, car: tuple, redline: float | dict):
@@ -211,6 +265,9 @@ class RevLimiterDetector:
             ):
                 self._redline[car] = float(value)
                 self._verified.add(car)
+                seen = redline.get("max_wot_rpm")
+                if isinstance(seen, (int, float)) and seen > 0:
+                    self._max_wot_rpm[car] = float(seen)
             return
         if isinstance(redline, (int, float)) and redline > 0:
             self._redline[car] = float(redline)

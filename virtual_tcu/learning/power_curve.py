@@ -99,16 +99,31 @@ class PowerCurveDetector:
 
     MIN_SAMPLES = 8
     FULL_CONF_SAMPLES = 80
-    MIN_SPREAD = 0.06
-    GOOD_SPREAD = 0.16
+    # Real driving never produces the 0.16 sample spread the first version of
+    # this detector asked for: the TCU holds the engine in the top of the band,
+    # so the distribution stays narrow no matter how many full pulls are made.
+    # Across the nine issue #74 replays the observed spread was 0.045-0.099,
+    # which left every car permanently below the confidence floor.
+    MIN_SPREAD = 0.035
+    GOOD_SPREAD = 0.085
     # Upshift timing needs samples near the real redline; mid-range-only fits
     # extrapolate a peak too early (common on RWD before a limiter pull).
     HIGH_RPM_COVERAGE = 0.90
+    # Forza's nominal engine_max_rpm sits well above the reachable fuel cut on
+    # many cars (Ford GT cuts at 88.3% of nominal), so HIGH_RPM_COVERAGE alone
+    # would disable the curve for them forever. Repeatedly returning to the same
+    # ceiling proves the top of the range was sampled just as well as crossing
+    # 90% would — provided that ceiling is high enough to be a plausible
+    # limiter rather than a mid-range plateau.
+    MIN_CEILING_PCT = 0.78
+    CEILING_BAND = 0.02
+    CEILING_SAMPLES = 40.0
     STATIONARY_LEARN_SPEED_KMH = 8.0
 
     def __init__(self):
         self._fits: dict[tuple, _ParabolaFit] = {}
         self._max_r: dict[tuple, float] = {}
+        self._ceiling_hits: dict[tuple, float] = {}
 
     def _gear_ok(self, td: Telemetry) -> bool:
         if td.gear >= 2:
@@ -128,6 +143,10 @@ class PowerCurveDetector:
         prev_max = self._max_r.get(ck, 0.0)
         if r > prev_max:
             self._max_r[ck] = r
+            if r > prev_max + self.CEILING_BAND:
+                # A genuinely higher top means the previous "ceiling" was not
+                # one — the evidence collected against it is void.
+                self._ceiling_hits[ck] = 0.0
         # Partial throttle and some slip still carry curve-shape info but
         # weigh less — the least-squares fit absorbs them as soft evidence.
         weight = 1.0
@@ -137,7 +156,29 @@ class PowerCurveDetector:
             weight *= 0.4
         if r >= self.HIGH_RPM_COVERAGE and td.throttle >= 0.85:
             weight *= 1.6
+        if td.throttle >= 0.85 and r >= self._max_r[ck] - self.CEILING_BAND:
+            self._ceiling_hits[ck] = self._ceiling_hits.get(ck, 0.0) + 1.0
         self._fits.setdefault(ck, _ParabolaFit()).add(r, td.torque_nm, weight)
+
+    def _has_high_rpm_coverage(self, car_key: tuple) -> bool:
+        max_r = self._max_r.get(car_key, 0.0)
+        if max_r >= self.HIGH_RPM_COVERAGE:
+            return True
+        return self.observed_ceiling_pct(car_key) is not None
+
+    def observed_ceiling_pct(self, car_key: tuple) -> float | None:
+        """Highest WOT RPM fraction the engine has repeatedly returned to.
+
+        This is a lower bound on the real fuel cut, confirmed by revisiting the
+        same ceiling rather than by a fuel-cut sawtooth, so it stays available
+        on cars the TCU upshifts before the limiter is ever touched.
+        """
+        max_r = self._max_r.get(car_key, 0.0)
+        if max_r < self.MIN_CEILING_PCT:
+            return None
+        if self._ceiling_hits.get(car_key, 0.0) < self.CEILING_SAMPLES:
+            return None
+        return max_r
 
     def _peaks(self, car_key: tuple):
         """Return (peak_torque_rpm, peak_power_rpm, confidence)."""
@@ -184,7 +225,7 @@ class PowerCurveDetector:
         conf = n_conf * s_conf * high_conf
         # Mid-range-only parabolas often place the peak far below the real
         # power band — ignore until we have high-RPM evidence.
-        if max_r < self.HIGH_RPM_COVERAGE:
+        if not self._has_high_rpm_coverage(car_key):
             return None, None, 0.0
         return pt, pp, conf
 
@@ -204,14 +245,12 @@ class PowerCurveDetector:
         if pp is None:
             return fallback
         model = max(0.65, min(0.97, pp + offset))
-        # Blend: early low-confidence estimates lean on the fallback,
-        # mature ones trust the model fully. Never upshift earlier than the
-        # configured fallback while high-RPM coverage is still missing.
-        blended = conf * model + (1.0 - conf) * fallback
-        max_r = self._max_r.get(td.car_key, 0.0)
-        if max_r < self.HIGH_RPM_COVERAGE or conf < 0.70:
-            return max(blended, fallback)
-        return blended
+        # Blend: early low-confidence estimates lean on the fallback, mature
+        # ones trust the model fully. The blend weight is the whole point of
+        # the confidence score, so there is no additional hard gate on top of
+        # it — one used to sit here and, together with the unreachable spread
+        # thresholds, meant the model never moved a single shift point.
+        return conf * model + (1.0 - conf) * fallback
 
     def has_data(self, car_key: tuple) -> bool:
         return self._peaks(car_key)[1] is not None
@@ -225,6 +264,7 @@ class PowerCurveDetector:
         max_r = self._max_r.get(car_key)
         if max_r is not None:
             data["max_r"] = max_r
+        data["ceiling_hits"] = self._ceiling_hits.get(car_key, 0.0)
         return data
 
     def load(self, car_key: tuple, data: dict):
@@ -234,3 +274,4 @@ class PowerCurveDetector:
         self._fits[car_key] = _ParabolaFit.from_dict(data)
         if "max_r" in data:
             self._max_r[car_key] = float(data["max_r"])
+        self._ceiling_hits[car_key] = float(data.get("ceiling_hits", 0.0))
