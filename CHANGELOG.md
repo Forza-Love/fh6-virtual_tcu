@@ -1,5 +1,20 @@
 # Changelog
 
+## [13.2.8] - 2026-08-07
+
+### Fixed
+
+- **Upshifts pinned to the rev limiter (#74)** — the learned power curve is now actually applied. Its confidence score required a sample spread real driving never produces (nine reported replays measured 0.045–0.099 against a 0.16 threshold), and a second hard gate on top of the confidence blend discarded whatever survived, so across roughly 500 upshifts in those logs the curve moved the shift point five times. Every car ended up shifting at its fuel cut instead of near peak power.
+- **Cars whose fuel cut sits below 90% of nominal RPM** — high-RPM coverage was measured against Forza's inflated nominal `engine_max_rpm`, which the Ford GT (fuel cut at 88.3% of nominal) can never reach, permanently disabling its power curve. Repeatedly returning to the same ceiling now counts as coverage.
+- **Gears that top out below their upshift target** — a car can be aero-limited without pinning RPM the way the load-plateau detector demands (the reported Ford GT crawled up 4th at 0.6%/s while still gaining 2.2 km/h/s, and needed 320 km/h to reach a target it met at 299). A longer stall window, armed only past peak power, now frees the gear; the car reaches 5th instead of staying in 4th.
+- **Traction sawtooth learned as fuel cut** — a low-gear oscillation could be verified as the rev limiter and then drag every shift point down for good (a Pagani Huayra R was pinned to 9,765 rpm after having already revved to 11,524, collapsing its Race target to the 80% mid threshold). A learned or candidate limiter must now clear the highest WOT RPM the engine has demonstrably reached, and a stored value the engine later revs past is discarded. Profiles written before this check are reconciled on load against the power curve's persisted coverage.
+- **Road-speed walls below peak power** — plateau and stall evidence may no longer place the shift point under the learned peak-power RPM; only a measured rev ceiling can.
+
+### Changed
+
+- **RWD traction upshifts** — the cold-curve guard now requires a calibrated landing gear rather than using power-curve confidence as a proxy for "this car has been driven a while", which stopped holding once the curve matures at a realistic rate.
+- **Profile contents** — `power_curve.ceiling_hits` and `rev_limiter.max_wot_rpm` are added as optional keys. Both default to zero when absent, existing fields keep their units and meaning, and older files load unchanged, so `PROFILE_SCHEMA_VERSION` stays at 1 and no car has to relearn.
+
 ## [13.2.7] - 2026-07-21
 
 ### Fixed
@@ -249,6 +264,21 @@
 ---
 
 # 更新日志
+
+## [13.2.8] - 2026-08-07
+
+### 修复
+
+- **升挡点被钉死在断油线上（#74）** — 学习到的动力曲线现在真正生效。此前它的置信度要求真实驾驶产生不出的采样离散度（issue 提供的九份回放实测 0.045–0.099，阈值却是 0.16），并且在置信度混合之上还压了一道硬门，把侥幸活下来的结果也抹平；结果是这些日志里约 500 次升挡中，动力曲线只影响过 5 次。所有车最终都在断油点换挡，而不是在功率峰值附近。
+- **断油转速低于名义转速 90% 的车辆** — 高转覆盖度原本以 Forza 虚高的 `engine_max_rpm` 为分母，Ford GT（断油在名义值的 88.3%）永远无法达标，动力曲线被永久禁用。现在反复回到同一转速天花板也计为已覆盖转速带顶部。
+- **无法达到升挡目标的挡位** — 车辆可能受风阻限制却不符合负载平台检测要求的「转速钉死」（问题中的 Ford GT 在 4 挡以每秒 0.6% 缓慢爬升，同时车速仍在每秒增加 2.2 km/h；目标需要 320 km/h，实际只能到 299）。新增更长窗口的停滞判据，且仅在越过功率峰值后才武装，使该挡位得以解放——该车现在能升上 5 挡而不是卡在 4 挡。
+- **牵引锯齿被误学成断油** — 低挡牵引振荡可能被确认为断油红线，并从此把所有换挡点拖低（一台 Pagani Huayra R 在已经拉到 11,524 rpm 之后仍被钉在 9,765 rpm，Race 目标塌陷到 80% 的中段地板）。现在已学习值与候选值都必须高于发动机实际达到过的最高 WOT 转速；已存储但后来被转速超越的值会被丢弃。此检查之前写入的配置文件，会在加载时用动力曲线已持久化的覆盖度进行校正。
+- **低于功率峰值的车速墙** — 负载平台与挡位停滞证据不再允许把换挡点压到学习到的功率峰值转速以下；只有实测到的转速天花板才可以。
+
+### 变更
+
+- **后驱牵引升挡** — 冷车守卫改为要求目标挡位已标定落点转速，不再用动力曲线置信度充当「这辆车已经开了一段时间」的代理——在曲线以正常速度成熟之后，该代理不再成立。
+- **配置文件内容** — 新增可选键 `power_curve.ceiling_hits` 与 `rev_limiter.max_wot_rpm`。两者缺失时按 0 处理，既有字段的单位与含义不变，旧文件照常加载，因此 `PROFILE_SCHEMA_VERSION` 保持为 1，任何车辆都无需重新学习。
 
 ## [13.2.7] - 2026-07-21
 
